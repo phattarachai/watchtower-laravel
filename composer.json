@@ -1,0 +1,62 @@
+{
+    "name": "phattarachai/watchtower-laravel",
+    "description": "Laravel client for the Watchtower self-hosted Sentry-compatible exception tracker. Wires up sentry/sentry-laravel and a same-origin browser tunnel that dodges ad blockers.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "laravel",
+        "sentry",
+        "watchtower",
+        "error-tracking",
+        "exception-tracking",
+        "observability"
+    ],
+    "authors": [
+        {
+            "name": "Phattarachai Chaimongkol",
+            "email": "pc@phattarachai.dev"
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "guzzlehttp/guzzle": "^7.0",
+        "illuminate/console": "^12.0 || ^13.0",
+        "illuminate/contracts": "^12.0 || ^13.0",
+        "illuminate/http": "^12.0 || ^13.0",
+        "illuminate/support": "^12.0 || ^13.0",
+        "sentry/sentry-laravel": "^4.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^10.0",
+        "pestphp/pest": "^4.0",
+        "pestphp/pest-plugin-laravel": "^4.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Phattarachai\\WatchtowerLaravel\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Phattarachai\\WatchtowerLaravel\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/pest"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Phattarachai\\WatchtowerLaravel\\WatchtowerServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
