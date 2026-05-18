@@ -1,7 +1,7 @@
 ---
 name: watchtower-error-tracking-reference
-description: End-to-end install reference for wiring Watchtower error tracking into a new project. Covers Laravel backends (via the phattarachai/watchtower-laravel package, one command — including the package's smart defaults: multi-guard user-context middleware, BeforeSend noise filter + secret scrubbing, breadcrumb env keys), browser JavaScript frontends (via @sentry/browser with the tunnel option and the published applyWatchtowerUser helper), the verify-via-REST flow, the team-scoped MCP server for in-conversation triage from Claude Code, and troubleshooting. Read this when SKILL.md directs you here, or when the user wants to install, configure, verify, triage, or troubleshoot Watchtower error tracking.
-version: 2026.05.18.1
+description: End-to-end install reference for wiring Watchtower error tracking into a new project. Covers Laravel backends (via the phattarachai/watchtower-laravel package, one command — including the package's smart defaults: multi-guard user-context middleware, BeforeSend noise filter + secret scrubbing, breadcrumb env keys), browser JavaScript frontends (via @sentry/browser with the tunnel option and the published applyWatchtowerUser helper), the verify-via-REST flow, the project-scoped MCP server for in-conversation triage from Claude Code, and troubleshooting. Read this when SKILL.md directs you here, or when the user wants to install, configure, verify, triage, or troubleshoot Watchtower error tracking.
+version: 2026.05.18.2
 ---
 
 # Watchtower install — reference
@@ -27,7 +27,7 @@ The trade-off of the shared-DSN default is that the frontend DSN ships in the JS
 | Very noisy frontend (third-party scripts, extensions) | Different cooldowns, different recipients, different rate limits than backend. |
 | Different alert recipients per runtime | Frontend team owns `javascript`; backend team owns `php-laravel`. |
 
-To split: after `watchtower:install`, edit `.env` to point `VITE_SENTRY_DSN` at a second Watchtower project's DSN. Both projects sit under the same Watchtower **team**, so the MCP server and inbox filters keep working.
+To split: after `watchtower:install`, edit `.env` to point `VITE_SENTRY_DSN` at a second Watchtower project's DSN. Each Watchtower project authenticates its own MCP server — register a second one with `claude mcp add watchtower-frontend <host>/mcp --header "Authorization: Bearer <frontend-public-key>"` so Claude can triage both inboxes.
 
 ## DSN format — must be numeric
 
@@ -59,7 +59,7 @@ The package is published at <https://packagist.org/packages/phattarachai/watchto
 7. **Writes Sentry breadcrumb env keys** (only when absent — re-runs preserve customization): `SENTRY_BREADCRUMBS_SQL_QUERIES_ENABLED=true`, `SENTRY_BREADCRUMBS_SQL_BINDINGS_ENABLED=false` (bindings can leak PII even after scrubbing — opt in if you need them), `SENTRY_BREADCRUMBS_CACHE_ENABLED=true`, `SENTRY_BREADCRUMBS_HTTP_CLIENT_REQUESTS_ENABLED=true`, `SENTRY_BREADCRUMBS_REDIS_COMMANDS_ENABLED=true`. Result: events arrive with the last ~100 query/cache/HTTP/Redis ops in Watchtower's Breadcrumbs tab.
 8. **Publishes the browser user-context helper** (Vite path only). Calls `vendor:publish --tag=watchtower-js --force=false` → drops `resources/js/vendor/watchtower-user-context.js`. The printed `Sentry.init(...)` snippet imports and calls `applyWatchtowerUser()` from this file; a separate `<meta name="watchtower-user-*">` snippet is printed for the root Blade layout. See [Browser user context](#browser-user-context) below.
 
-Then it registers the team-scoped MCP server with Claude Code if the `claude` CLI is on PATH (see [Querying via MCP](#querying-via-mcp)).
+Then it registers the project-scoped MCP server with Claude Code if the `claude` CLI is on PATH (see [Querying via MCP](#querying-via-mcp)).
 
 Flags:
 - `--dsn=…` — Watchtower DSN. Skips the prompt.
@@ -435,7 +435,7 @@ Valid `snooze_duration` values: `1h`, `24h`, `7d`, `30d`, `until_event`.
 
 ## Querying via MCP
 
-Watchtower exposes a Model Context Protocol server at `/mcp` for Claude Code (and any other MCP client). Same auth model as REST — the DSN public_key is the bearer token — but **team-scoped**: a single MCP server gives Claude access to every project in the Watchtower team that owns the DSN. Set it up once per team, not once per project.
+Watchtower exposes a Model Context Protocol server at `/mcp` for Claude Code (and any other MCP client). Same auth model as REST — the DSN public_key is the bearer token — and **project-scoped**: each MCP server gives Claude access to one Watchtower project, matching how the project-scoped REST endpoints work. With the package default of one Watchtower project per client app (backend + browser share the DSN), a single MCP registration covers both runtimes.
 
 ### Add the server
 
@@ -446,23 +446,27 @@ claude mcp add watchtower https://watchtower.phattarachai.app/mcp \
   --header "Authorization: Bearer <PUBLIC_KEY>"
 ```
 
-Extract `<PUBLIC_KEY>` from any team-member project's `.env`:
+Extract `<PUBLIC_KEY>` from the project's `.env`:
 
 ```bash
 grep -oE '://[a-z0-9]+@' .env | head -1 | tr -d ':/@'
 ```
 
-For a team with both a Laravel backend and a JS frontend, either project's DSN key authenticates Claude against both projects.
+If you actually split backend and browser into two Watchtower projects (rare — see [When to split into two projects](#when-to-split-into-two-projects)), register one MCP server per project with distinct names so Claude can address each inbox:
+
+```bash
+claude mcp add watchtower-backend  <host>/mcp --header "Authorization: Bearer <backend-public-key>"
+claude mcp add watchtower-frontend <host>/mcp --header "Authorization: Bearer <frontend-public-key>"
+```
 
 ### Tool reference
 
 | Tool | Args | Returns |
 |---|---|---|
-| `get_team` | — | Team summary + projects array (`id`, `slug`, `name`, `platform`, `retention_days`, `team`) |
-| `get_stats` | `project?`, `window?` (`24h`/`7d`/`30d`, default `7d`) | Event volume + per-project + per-level breakdown + top-5 issues in window + status_mix |
-| `list_issues` | `project?`, `status?`, `environment?`, `level?`, `q?`, `since?`, `page?` | Paginated issue groups across the team, newest-seen first |
+| `get_stats` | `window?` (`24h`/`7d`/`30d`, default `7d`) | Event volume + per-level breakdown + top-5 issues in window + status_mix |
+| `list_issues` | `status?`, `environment?`, `level?`, `q?`, `since?`, `page?` | Paginated issue groups for this project, newest-seen first |
 | `get_issue` | `issue_id` | One issue group + permalink to the Watchtower UI + **`latest_event_id`** (skip the `list_events` round-trip — feed it straight to `get_event`) |
-| `list_events` | `project?`, `environment?`, `release?`, `level?`, `group_id?`, `since?`, `page?`, `per_page?` (1–100, default 25) | Paginated events across the team (slim shape — id, level, env, top_frame), newest first |
+| `list_events` | `environment?`, `release?`, `level?`, `group_id?`, `since?`, `page?`, `per_page?` (1–100, default 25) | Paginated events for this project (slim shape — id, level, env, top_frame), newest first |
 | `get_event` | `event_id` (UUID) | **Full event payload** — slim fields plus `stacktrace` frames, `breadcrumbs`, `request`, `contexts`, `tags`, `extra`, `sdk`, `mechanism`. Verification core AND debugging entry point. |
 | `resolve_issue` | `issue_id` | Marks resolved; re-opens automatically on regression in a higher release |
 | `ignore_issue` | `issue_id` | Marks ignored; does NOT re-open on new events |
@@ -475,13 +479,13 @@ After capturing an exception in the client app, ask Claude:
 
 > "Use Watchtower to verify event_id `<uuid>` arrived."
 
-Claude calls `get_event`. Success → ingested (and the response includes the full stacktrace + breadcrumbs, so the same call doubles as a debugging starting point). An error response saying *"Event not found in this team. The ingest pipeline is async — retry after a few seconds…"* → the queue hasn't drained yet, try again in a moment.
+Claude calls `get_event`. Success → ingested (and the response includes the full stacktrace + breadcrumbs, so the same call doubles as a debugging starting point). An error response saying *"Event not found in this project. The ingest pipeline is async — retry after a few seconds…"* → the queue hasn't drained yet, try again in a moment.
 
 ### Debug an issue end-to-end via MCP
 
-The common "fix issue N in project X" flow is a 2-call path:
+The common "fix issue N" flow is a 2-call path:
 
-> "Fix Watchtower issue #44 in project `acme-web`."
+> "Fix Watchtower issue #44."
 
 1. `get_issue(issue_id=44)` — title, status, counts, permalink, **and `latest_event_id`**.
 2. `get_event(event_id=<latest_event_id>)` — full payload. The agent now has the stacktrace (with `in_app` flags), breadcrumbs (the user actions leading up to the error), request URL/method, contexts, tags, and SDK info needed to open the right file and propose a fix.
@@ -489,7 +493,7 @@ The common "fix issue N in project X" flow is a 2-call path:
 
 ### Privilege scope
 
-DSN holder gets read **and** mutate access across the whole team. Per-user / per-team-member tokens are not implemented yet — same boundary as the REST endpoints.
+DSN holder gets read **and** mutate access for that one project. Per-user / per-team-member tokens are not implemented yet — same boundary as the REST endpoints.
 
 ## Troubleshooting
 
@@ -508,7 +512,7 @@ DSN holder gets read **and** mutate access across the whole team. Per-user / per
 | `/api/v1/...` returns 401 even with the DSN key | Token revoked / DSN regenerated | Get a fresh DSN from project settings |
 | `/api/v1/events/{id}` returns 404 right after sending | Async ingestion hasn't drained yet | Retry after 2–5s |
 | MCP: `claude mcp add` succeeds but tool calls fail with `Unauthenticated` | Bearer token revoked / wrong DSN | Re-copy DSN from project settings; re-run `claude mcp add` |
-| MCP: tool says "Issue not found in this team" but the issue is visible in the Watchtower UI | The issue belongs to a project under a different team than the DSN key you registered | Use a DSN key from the right team, or move the project to this team via team settings |
+| MCP: tool says "Issue not found in this project" but the issue is visible in the Watchtower UI | The issue belongs to a different Watchtower project than the DSN key you registered | Re-run `claude mcp add` with the DSN key for the project that owns the issue, or register a second MCP server alongside the first with a distinct name |
 | User tab in Watchtower is empty despite a logged-in user triggering the exception | Smart-defaults chain broken at one of three points | Check (a) `SENTRY_SEND_DEFAULT_PII=true` — without it Sentry strips request data + IP before BeforeSend runs; (b) `WATCHTOWER_USER_CONTEXT` not set to `false`; (c) the right guard is listed in `WATCHTOWER_USER_CONTEXT_GUARDS` (or it's `auto`); (d) for browser-side, the `<meta name="watchtower-user-*">` tags are in `<head>` AND `applyWatchtowerUser()` is called after `Sentry.init`. See [Smart defaults](#smart-defaults). |
 | Inbox is suddenly missing `ValidationException` / `404` / auth-fail events | BeforeSend smart-default is dropping them — this is the design | If you actually want these in the inbox, edit `watchtower.before_send.ignored_exceptions` and remove the relevant class, or set `WATCHTOWER_BEFORE_SEND=false` to disable the filter entirely. |
 | Request body in event payload shows `[Filtered]` for a non-secret field | The field name matches an entry in `watchtower.before_send.scrub_keys` (case-insensitive) | Edit `watchtower.before_send.scrub_keys` to remove the entry, or rename the field. |
@@ -528,5 +532,5 @@ Boost re-copies the skill files into `.claude/skills/watchtower-error-tracking/`
 
 This skill is feature-complete for Phase 6. Remaining items, deferred until real need shows up:
 
-- Per-user / per-team-member API tokens. Today any team member's DSN public_key authenticates against the full team — adequate for small teams, may want tighter scoping later.
+- Per-user / per-team-member API tokens. Today the project's DSN public_key is the only credential — anyone with it gets read + mutate access for that project. Adequate for small teams; revisit when trust boundaries inside a project start mattering.
 - Bulk triage tools (`resolve_many`, `snooze_many`). Not needed until agents complain about one-at-a-time mutations.

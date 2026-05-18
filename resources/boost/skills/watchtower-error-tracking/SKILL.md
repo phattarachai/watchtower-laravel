@@ -1,7 +1,7 @@
 ---
 name: watchtower-error-tracking
-description: Use this skill when the user wants to wire up Watchtower (a self-hosted, Sentry-compatible exception tracker) into a new project, or connect Claude Code to Watchtower's MCP server for in-conversation issue triage. Covers Laravel backends end-to-end via the phattarachai/watchtower-laravel package (one command — DSN, exception handler patch, relay route, MCP registration, plus smart defaults for user-context middleware, BeforeSend noise filtering + secret scrubbing, and breadcrumbs), browser JavaScript via @sentry/browser with the tunnel option, verifying ingestion through Watchtower's REST API, and adding the team-scoped MCP server so Claude can query and triage issues directly. Triggers on mentions of Watchtower, sentry-laravel, @sentry/browser, SENTRY_LARAVEL_DSN, VITE_SENTRY_DSN, WATCHTOWER_DSN, SENTRY_SEND_DEFAULT_PII, WATCHTOWER_USER_CONTEXT, WATCHTOWER_BEFORE_SEND, "set up error tracking", "wire up Watchtower", "verify the exception was reported", "add Watchtower MCP", "claude mcp add watchtower", "triage Watchtower issues from Claude", "user tab empty in Watchtower", "scrub secrets in Sentry events", or "ignore validation exceptions".
-version: 2026.05.18.2
+description: Use this skill when the user wants to wire up Watchtower (a self-hosted, Sentry-compatible exception tracker) into a new project, or connect Claude Code to Watchtower's MCP server for in-conversation issue triage. Covers Laravel backends end-to-end via the phattarachai/watchtower-laravel package (one command — DSN, exception handler patch, relay route, MCP registration, plus smart defaults for user-context middleware, BeforeSend noise filtering + secret scrubbing, and breadcrumbs), browser JavaScript via @sentry/browser with the tunnel option, verifying ingestion through Watchtower's REST API, and adding the project-scoped MCP server so Claude can query and triage issues directly. Triggers on mentions of Watchtower, sentry-laravel, @sentry/browser, SENTRY_LARAVEL_DSN, VITE_SENTRY_DSN, WATCHTOWER_DSN, SENTRY_SEND_DEFAULT_PII, WATCHTOWER_USER_CONTEXT, WATCHTOWER_BEFORE_SEND, "set up error tracking", "wire up Watchtower", "verify the exception was reported", "add Watchtower MCP", "claude mcp add watchtower", "triage Watchtower issues from Claude", "user tab empty in Watchtower", "scrub secrets in Sentry events", or "ignore validation exceptions".
+version: 2026.05.18.3
 ---
 
 # Watchtower error tracking
@@ -58,9 +58,9 @@ curl -fsSL -H "Authorization: Bearer $PUBLIC_KEY" \
 
 200 → ingested. 404 → not received yet (the queue is async; retry after a few seconds). Full endpoint list in `reference.md` § "Querying via REST".
 
-## MCP server (one per team, not per project)
+## MCP server
 
-Watchtower exposes an MCP server at `/mcp` so Claude can query and triage issues directly. A single registration sees every project in the team — a Laravel backend (`acme`) and a JS frontend (`acme-web`) share one MCP setup.
+Watchtower exposes an MCP server at `/mcp` so Claude can query and triage issues directly. Each registration is scoped to one Watchtower project — same as the project-scoped REST endpoints. The package's default of one Watchtower project per client app means a single registration covers backend exceptions and browser exceptions in the same inbox.
 
 `watchtower:install` registers it automatically when the `claude` CLI is on PATH. Manual registration:
 
@@ -69,6 +69,6 @@ claude mcp add watchtower https://watchtower.phattarachai.app/mcp \
   --header "Authorization: Bearer <PUBLIC_KEY>"
 ```
 
-`<PUBLIC_KEY>` is any project's DSN public_key in the team — the segment between `https://` and `@` in `SENTRY_LARAVEL_DSN`. Either project's key authenticates Claude against every project in the team.
+`<PUBLIC_KEY>` is the project's DSN public_key — the segment between `https://` and `@` in `SENTRY_LARAVEL_DSN`. If you actually split backend and browser into two Watchtower projects (rare — see `reference.md` § "When to split into two projects"), register one MCP server per project with distinct names (e.g. `watchtower-backend`, `watchtower-frontend`).
 
 Day-to-day tool selection lives in the auto-injected CLAUDE.md guideline (`resources/boost/guidelines/core.md`). Full arg + return reference: `reference.md` § "Querying via MCP".
