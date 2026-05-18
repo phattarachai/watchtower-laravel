@@ -57,7 +57,7 @@ The package is published at <https://packagist.org/packages/phattarachai/watchto
 5. **Detects Vite.** If `vite.config.{js,ts}` exists, writes `VITE_SENTRY_DSN` (same value as `SENTRY_LARAVEL_DSN`), `VITE_SENTRY_TUNNEL=/api/watchtower-relay`, and `VITE_SENTRY_ENVIRONMENT="${APP_ENV}"` to `.env` and `.env.example`. Prints the `Sentry.init(...)` snippet to paste into the entry JS file (see [Browser-side init](#browser-side-init) below). To point the browser side at a *different* Watchtower project, edit `VITE_SENTRY_DSN` in `.env` after install — see [When to split into two projects](#when-to-split-into-two-projects).
 6. **Confirms `SENTRY_SEND_DEFAULT_PII`.** Prompts `Enable SENTRY_SEND_DEFAULT_PII (attach request data + IP — Watchtower scrubs secrets via BeforeSend)?` — **opt-in**, defaults to `no` across every env (regulated industries and casual installs both get the conservative default). Writes `SENTRY_SEND_DEFAULT_PII=true|false`. Without PII the SDK strips the request body + IP before any local filter sees them — the User tab and Request tab in Watchtower stay empty. Flip to `yes` only after confirming `BeforeSend`'s scrub coverage (step 4 config) is sufficient for your app's data; that's what makes it safe to leave on in production.
 7. **Writes Sentry breadcrumb env keys** (only when absent — re-runs preserve customization): `SENTRY_BREADCRUMBS_SQL_QUERIES_ENABLED=true`, `SENTRY_BREADCRUMBS_SQL_BINDINGS_ENABLED=false` (bindings can leak PII even after scrubbing — opt in if you need them), `SENTRY_BREADCRUMBS_CACHE_ENABLED=true`, `SENTRY_BREADCRUMBS_HTTP_CLIENT_REQUESTS_ENABLED=true`, `SENTRY_BREADCRUMBS_REDIS_COMMANDS_ENABLED=true`. Result: events arrive with the last ~100 query/cache/HTTP/Redis ops in Watchtower's Breadcrumbs tab.
-8. **Publishes the browser user-context helper** (Vite path only). Calls `vendor:publish --tag=watchtower-js --force=false` → drops `resources/js/vendor/watchtower-user-context.js`. The printed `Sentry.init(...)` snippet imports and calls `applyWatchtowerUser()` from this file; a separate `<meta name="watchtower-user-*">` snippet is printed for the root Blade layout. See [Browser user context](#browser-user-context) below.
+8. **Publishes the browser helper** (Vite path only). Calls `vendor:publish --tag=watchtower-js --force=false` → drops `resources/js/vendor/watchtower.js`. The printed snippet is a 3-line import + `initWatchtower()` call — the actual `Sentry.init(...)` config lives inside the published helper, so per-entry duplication is gone. A separate `<meta name="watchtower-user-*">` snippet is printed for the root Blade layout. See [Browser user context](#browser-user-context) below.
 
 Then it registers the project-scoped MCP server with Claude Code if the `claude` CLI is on PATH (see [Querying via MCP](#querying-via-mcp)).
 
@@ -181,14 +181,14 @@ Set any specific key to `false` in `.env` to disable that family without disabli
 
 ### Browser user context
 
-The install command publishes `resources/js/vendor/watchtower-user-context.js` and prints two snippets to paste:
+The install command publishes `resources/js/vendor/watchtower.js` and prints two snippets to paste:
 
-1. Updated `Sentry.init(...)` block — imports `applyWatchtowerUser` from the published helper and calls it after `Sentry.init`. The helper reads `<meta name="watchtower-user-{id,email,name}">` from the document and calls `Sentry.setUser({id, email, username})` with whatever values are present (no-op when no meta tags are found).
+1. Per-entry init block — imports `initWatchtower` from the published helper and calls it. The helper runs `Sentry.init(...)` with the Watchtower-tuned defaults (same-origin tunnel, `denyUrls` for browser extensions, no PII) and then reads `<meta name="watchtower-user-{id,email,name}">` from the document and calls `Sentry.setUser({id, email, username})` with whatever values are present (no-op when no meta tags are found). The Sentry config lives inside the helper, so adding the snippet to multiple Vite entries does not duplicate the config.
 2. `<meta name="watchtower-user-*">` block — paste into the root Blade layout's `<head>`, rendered from `auth()->id() / ->user()?->email / ->user()?->name`.
 
 The result: browser-side exceptions get the same User tab population as server-side, with the same `id`/`email`/`username` mapping.
 
-The published helper is yours to edit — `--force=false` on re-runs means customizations are preserved. The package version is the source of truth in `vendor/phattarachai/watchtower-laravel/resources/js/watchtower-user-context.js`.
+The published helper is yours to edit — `--force=false` on re-runs means customizations are preserved. The package version is the source of truth in `vendor/phattarachai/watchtower-laravel/resources/js/watchtower.js`. To customize the Sentry options (e.g. add `ignoreErrors`), edit `Sentry.init({ ... })` inside the published helper, not in every entry.
 
 ### Recommended `.env` per environment
 
@@ -204,48 +204,42 @@ For the rare cases that warrant splitting backend and frontend into two Watchtow
 
 ## Browser-side init
 
-The install command writes the env keys, publishes the user-context helper, and prints two snippets — but does NOT modify your entry JS file or your Blade layout. Those one-time pastes are on you.
+The install command writes the env keys, publishes the helper, and prints two snippets — but does NOT modify your entry JS file or your Blade layout. Those one-time pastes are on you (or pass `--patch-js` / `--patch-views` to auto-inject them).
 
 In `resources/js/app.js` (or wherever your bundler entry is), add at the top:
 
 ```javascript
-import * as Sentry from '@sentry/browser';
-import { applyWatchtowerUser } from './vendor/watchtower-user-context.js';
+import { initWatchtower } from './vendor/watchtower.js';
 
-if (import.meta.env.VITE_SENTRY_DSN) {
-    Sentry.init({
-        dsn: import.meta.env.VITE_SENTRY_DSN,
-        tunnel: import.meta.env.VITE_SENTRY_TUNNEL,  // /api/watchtower-relay
-        environment: import.meta.env.VITE_SENTRY_ENVIRONMENT ?? 'production',
-        tracesSampleRate: 0,
-        sendDefaultPii: false,
+initWatchtower();
+```
 
-        // Drop noise from browser extensions, sandboxed iframes, and known
-        // ad-blocker injection points. Safe to keep on; rarely a false positive.
-        denyUrls: [
-            /extensions\//i,
-            /^chrome:\/\//i,
-            /^chrome-extension:\/\//i,
-            /^moz-extension:\/\//i,
-            /^safari-extension:\/\//i,
-            /^safari-web-extension:\/\//i,
-        ],
+That's the entire per-entry footprint. Repeat for every Vite entry that should report browser errors — the import is cheap and `initWatchtower()` is idempotent (only the first call performs `Sentry.init`).
 
-        // ignoreErrors: [
-        //     // Network noise that's the user's connection, not your bug:
-        //     'Network request failed',
-        //     'NetworkError',
-        //     'Failed to fetch',
-        //     // Benign ResizeObserver chatter from layout shifts:
-        //     'ResizeObserver loop limit exceeded',
-        //     'ResizeObserver loop completed with undelivered notifications',
-        //     // Safari quirks:
-        //     'Non-Error promise rejection captured',
-        // ],
-    });
+The Sentry config — tunnel, environment, `sendDefaultPii: false`, browser-extension `denyUrls` — lives inside `resources/js/vendor/watchtower.js`. Customize there once instead of per entry:
 
-    applyWatchtowerUser();
-}
+```javascript
+// resources/js/vendor/watchtower.js
+Sentry.init({
+    dsn: import.meta.env.VITE_SENTRY_DSN,
+    tunnel: import.meta.env.VITE_SENTRY_TUNNEL,  // /api/watchtower-relay
+    environment: import.meta.env.VITE_SENTRY_ENVIRONMENT,
+    sendDefaultPii: false,
+    tracesSampleRate: 0,
+    denyUrls: [
+        /^chrome-extension:\/\//i,
+        /^moz-extension:\/\//i,
+        /^safari-extension:\/\//i,
+        /^safari-web-extension:\/\//i,
+    ],
+
+    // ignoreErrors: [
+    //     'Network request failed', 'NetworkError', 'Failed to fetch',
+    //     'ResizeObserver loop limit exceeded',
+    //     'ResizeObserver loop completed with undelivered notifications',
+    //     'Non-Error promise rejection captured',
+    // ],
+});
 ```
 
 Then in your root Blade layout's `<head>` — `resources/views/components/layouts/app.blade.php` or equivalent — paste:
@@ -256,11 +250,16 @@ Then in your root Blade layout's `<head>` — `resources/views/components/layout
 <meta name="watchtower-user-name" content="{{ auth()->user()?->name ?? '' }}">
 ```
 
-Then:
+Then install the browser SDK using whichever package manager the consumer already uses — `watchtower:install` detects the lockfile (`bun.lockb`/`bun.lock`, `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`) and prints the matching one-liner, or reports "already in package.json" when the dep is present. If you're running this manually:
 
 ```bash
+# pick the one that matches the project's lockfile
 npm install --save @sentry/browser
-npm run build
+pnpm add @sentry/browser
+yarn add @sentry/browser
+bun add @sentry/browser
+
+npm run build   # or pnpm build / yarn build / bun run build
 ```
 
 The `tunnel` option is non-negotiable for production deployments. Without it, ~10–30% of users with ad blockers will silently fail to report errors. The `applyWatchtowerUser()` call after `Sentry.init` is what fills Watchtower's User tab for browser-side exceptions — without it, you get the same User tab population gap on the browser side that disabling the middleware causes on the server side. Leave `ignoreErrors` commented at first; turn individual lines on once you've seen the actual noise in your project's Watchtower inbox.

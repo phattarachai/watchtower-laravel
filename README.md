@@ -36,15 +36,15 @@ Re-running is idempotent. Pass `--dry-run` to preview changes.
 
 The browser SDK posts envelopes to your own app at `/api/watchtower-relay`. The relay parses your configured DSN, forwards the request body verbatim to `{scheme}://{host_with_port}/api/watchtower-relay` on the Watchtower instance, and passes back the upstream status and rate-limit headers.
 
-```js
-import * as Sentry from '@sentry/browser';
+`watchtower:install` publishes a small helper to `resources/js/vendor/watchtower.js` that wraps `Sentry.init(...)` with the Watchtower-tuned defaults (same-origin tunnel, no PII, browser-extension `denyUrls`) and applies `<meta name="watchtower-user-*">` to `Sentry.setUser(...)`. Per Vite entry:
 
-Sentry.init({
-    dsn: import.meta.env.VITE_SENTRY_DSN,
-    tunnel: import.meta.env.VITE_SENTRY_TUNNEL,
-    environment: import.meta.env.VITE_SENTRY_ENVIRONMENT,
-});
+```js
+import { initWatchtower } from './vendor/watchtower.js';
+
+initWatchtower();
 ```
+
+The Sentry config lives inside the published helper, so multiple entries don't duplicate it. Customize options (e.g. `ignoreErrors`) there once.
 
 Because the request hits your own origin under `/api/`, ad-blockers don't recognize it as Sentry traffic.
 

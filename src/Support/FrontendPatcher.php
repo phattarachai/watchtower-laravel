@@ -14,13 +14,13 @@ namespace Phattarachai\WatchtowerLaravel\Support;
  */
 final class FrontendPatcher
 {
-    public const MARKER_JS_OPEN  = '// watchtower:sentry-init';
+    public const string MARKER_JS_OPEN  = '// watchtower:sentry-init';
 
-    public const MARKER_JS_CLOSE = '// /watchtower:sentry-init';
+    public const string MARKER_JS_CLOSE = '// /watchtower:sentry-init';
 
-    public const MARKER_BLADE_OPEN  = '{{-- watchtower:user-meta --}}';
+    public const string MARKER_BLADE_OPEN  = '{{-- watchtower:user-meta --}}';
 
-    public const MARKER_BLADE_CLOSE = '{{-- /watchtower:user-meta --}}';
+    public const string MARKER_BLADE_CLOSE = '{{-- /watchtower:user-meta --}}';
 
     public static function renderJsSnippet(): string
     {
@@ -29,25 +29,9 @@ final class FrontendPatcher
 
         return <<<JS
         {$open}
-        import * as Sentry from '@sentry/browser';
-        import { applyWatchtowerUser } from './vendor/watchtower-user-context.js';
+        import { initWatchtower } from './vendor/watchtower.js';
 
-        if (import.meta.env.VITE_SENTRY_DSN) {
-            Sentry.init({
-                dsn: import.meta.env.VITE_SENTRY_DSN,
-                tunnel: import.meta.env.VITE_SENTRY_TUNNEL,
-                environment: import.meta.env.VITE_SENTRY_ENVIRONMENT,
-                sendDefaultPii: false,
-                tracesSampleRate: 0,
-                denyUrls: [
-                    /^chrome-extension:\\/\\//i,
-                    /^moz-extension:\\/\\//i,
-                    /^safari-extension:\\/\\//i,
-                    /^safari-web-extension:\\/\\//i,
-                ],
-            });
-            applyWatchtowerUser();
-        }
+        initWatchtower();
         {$close}
         JS;
     }

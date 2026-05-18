@@ -24,7 +24,8 @@ it('prepends the Sentry init block above existing JS contents', function (): voi
     expect($patched)->toBeTrue()
         ->and($contents)->toContain(FrontendPatcher::MARKER_JS_OPEN)
         ->and($contents)->toContain(FrontendPatcher::MARKER_JS_CLOSE)
-        ->and($contents)->toContain('applyWatchtowerUser();')
+        ->and($contents)->toContain("import { initWatchtower } from './vendor/watchtower.js';")
+        ->and($contents)->toContain('initWatchtower();')
         ->and($contents)->toEndWith("console.log('app');\n");
 });
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Phattarachai\WatchtowerLaravel;
 
 use Illuminate\Routing\Router;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
 use Phattarachai\WatchtowerLaravel\Console\InstallCommand;
 use Phattarachai\WatchtowerLaravel\Console\TestCommand;
@@ -28,8 +29,16 @@ class WatchtowerServiceProvider extends ServiceProvider
         ], 'watchtower-config');
 
         $this->publishes([
-            __DIR__.'/../resources/js/watchtower-user-context.js' => resource_path('js/vendor/watchtower-user-context.js'),
+            __DIR__.'/../resources/js/watchtower.js' => resource_path('js/vendor/watchtower.js'),
         ], 'watchtower-js');
+
+        $this->loadViewsFrom(__DIR__.'/../resources/views', 'watchtower');
+
+        $this->publishes([
+            __DIR__.'/../resources/views' => resource_path('views/vendor/watchtower'),
+        ], 'watchtower-views');
+
+        Blade::directive('watchtowerUser', fn (): string => "<?php echo view('watchtower::user-meta')->render(); ?>");
 
         if (config('watchtower.relay.enabled', true)) {
             $this->loadRoutesFrom(__DIR__.'/../routes/api.php');

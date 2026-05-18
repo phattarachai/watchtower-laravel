@@ -12,6 +12,7 @@ use Phattarachai\WatchtowerLaravel\Support\EnvWriter;
 use Phattarachai\WatchtowerLaravel\Support\FilamentPanelDetector;
 use Phattarachai\WatchtowerLaravel\Support\FrontendPatcher;
 use Phattarachai\WatchtowerLaravel\Support\LayoutDetector;
+use Phattarachai\WatchtowerLaravel\Support\PackageManagerDetector;
 use Phattarachai\WatchtowerLaravel\Support\ViteEntryDetector;
 use Symfony\Component\Console\Output\OutputInterface;
 
@@ -264,7 +265,7 @@ class InstallCommand extends Command
 
         if ($dryRun) {
             $this->line('Would set in .env: VITE_SENTRY_DSN, VITE_SENTRY_TUNNEL, VITE_SENTRY_ENVIRONMENT');
-            $this->line('Would publish: resources/js/vendor/watchtower-user-context.js');
+            $this->line('Would publish: resources/js/vendor/watchtower.js');
 
             return;
         }
@@ -317,6 +318,7 @@ class InstallCommand extends Command
         if ($entries === []) {
             $this->output->writeln('No Vite JS entries detected from vite.config — paste the snippet below into your JS entry manually:', OutputInterface::OUTPUT_RAW);
             $this->writeRawSnippet(FrontendPatcher::renderJsSnippet());
+            $this->emitSentryBrowserHint();
 
             return;
         }
@@ -334,6 +336,22 @@ class InstallCommand extends Command
             $this->writeRawSnippet(FrontendPatcher::renderJsSnippet());
             $this->output->writeln('Re-run with --patch-js to inject the block above into every detected entry.', OutputInterface::OUTPUT_RAW);
         }
+
+        $this->emitSentryBrowserHint();
+    }
+
+    private function emitSentryBrowserHint(): void
+    {
+        $detector = new PackageManagerDetector(base_path());
+
+        if ($detector->hasDependency('@sentry/browser')) {
+            $this->output->writeln('@sentry/browser is already in package.json — no install step needed.', OutputInterface::OUTPUT_RAW);
+
+            return;
+        }
+
+        $this->output->writeln('Install the browser SDK (matches your lockfile):', OutputInterface::OUTPUT_RAW);
+        $this->writeRawSnippet($detector->installCommand('@sentry/browser'));
     }
 
     /**

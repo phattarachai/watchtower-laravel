@@ -64,7 +64,7 @@ afterEach(function (): void {
     }
 
     @unlink(base_path('vite.config.js'));
-    @unlink(resource_path('js/vendor/watchtower-user-context.js'));
+    @unlink(resource_path('js/vendor/watchtower.js'));
     @rmdir(resource_path('js/vendor'));
     @rmdir(resource_path('js'));
 });
@@ -264,20 +264,65 @@ it('does not write PII or breadcrumb keys in dry-run mode', function (): void {
     expect(file_get_contents($this->envPath))->toBe($envBefore);
 });
 
-it('prints the applyWatchtowerUser() snippet and Blade meta tags when Vite is present', function (): void {
+it('prints the initWatchtower() snippet and Blade meta tags when Vite is present', function (): void {
     file_put_contents(base_path('vite.config.js'), "export default {};\n");
 
     $this->artisan('watchtower:install', ['--dsn' => 'http://abc@watchtower.test/42'])
         ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
-        ->expectsOutputToContain("import { applyWatchtowerUser } from './vendor/watchtower-user-context.js';")
-        ->expectsOutputToContain('applyWatchtowerUser();')
-        ->expectsOutputToContain('denyUrls')
+        ->expectsOutputToContain("import { initWatchtower } from './vendor/watchtower.js';")
+        ->expectsOutputToContain('initWatchtower();')
         ->expectsOutputToContain('<meta name="watchtower-user-id"')
         ->expectsOutputToContain('<meta name="watchtower-user-email"')
         ->expectsOutputToContain('<meta name="watchtower-user-name"')
         ->assertExitCode(0);
 
-    expect(is_file(resource_path('js/vendor/watchtower-user-context.js')))->toBeTrue();
+    expect(is_file(resource_path('js/vendor/watchtower.js')))->toBeTrue();
+});
+
+it('suggests the package-manager-specific install command for @sentry/browser', function (): void {
+    file_put_contents(base_path('vite.config.js'), "export default {};\n");
+    file_put_contents(base_path('package.json'), '{}');
+    file_put_contents(base_path('pnpm-lock.yaml'), '');
+
+    $this->artisan('watchtower:install', ['--dsn' => 'http://abc@watchtower.test/42'])
+        ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
+        ->expectsOutputToContain('Install the browser SDK')
+        ->expectsOutputToContain('pnpm add @sentry/browser')
+        ->assertExitCode(0);
+
+    @unlink(base_path('package.json'));
+    @unlink(base_path('pnpm-lock.yaml'));
+});
+
+it('suggests bun add when bun.lockb is present', function (): void {
+    file_put_contents(base_path('vite.config.js'), "export default {};\n");
+    file_put_contents(base_path('package.json'), '{}');
+    file_put_contents(base_path('bun.lockb'), '');
+
+    $this->artisan('watchtower:install', ['--dsn' => 'http://abc@watchtower.test/42'])
+        ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
+        ->expectsOutputToContain('bun add @sentry/browser')
+        ->assertExitCode(0);
+
+    @unlink(base_path('package.json'));
+    @unlink(base_path('bun.lockb'));
+});
+
+it('skips the install hint when @sentry/browser is already a declared dependency', function (): void {
+    file_put_contents(base_path('vite.config.js'), "export default {};\n");
+    file_put_contents(base_path('package.json'), json_encode([
+        'dependencies' => ['@sentry/browser' => '^9.0.0'],
+    ]));
+    file_put_contents(base_path('package-lock.json'), '{}');
+
+    $this->artisan('watchtower:install', ['--dsn' => 'http://abc@watchtower.test/42'])
+        ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
+        ->expectsOutputToContain('@sentry/browser is already in package.json')
+        ->doesntExpectOutputToContain('Install the browser SDK')
+        ->assertExitCode(0);
+
+    @unlink(base_path('package.json'));
+    @unlink(base_path('package-lock.json'));
 });
 
 it('writes VITE_SENTRY_ENVIRONMENT with an unescaped dotenv reference', function (): void {
@@ -353,7 +398,7 @@ it('--patch-js injects the Sentry init block into detected entries', function ()
     $contents = (string) file_get_contents(resource_path('js/app.js'));
 
     expect($contents)->toContain('// watchtower:sentry-init')
-        ->and($contents)->toContain('applyWatchtowerUser();')
+        ->and($contents)->toContain('initWatchtower();')
         ->and($contents)->toEndWith("console.log('hi');\n");
 
     @unlink(resource_path('js/app.js'));
