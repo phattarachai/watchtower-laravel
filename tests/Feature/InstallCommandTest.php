@@ -279,3 +279,129 @@ it('prints the applyWatchtowerUser() snippet and Blade meta tags when Vite is pr
 
     expect(is_file(resource_path('js/vendor/watchtower-user-context.js')))->toBeTrue();
 });
+
+it('writes VITE_SENTRY_ENVIRONMENT with an unescaped dotenv reference', function (): void {
+    file_put_contents(base_path('vite.config.js'), "export default {};\n");
+
+    $this->artisan('watchtower:install', ['--dsn' => 'http://abc@watchtower.test/42'])
+        ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
+        ->assertExitCode(0);
+
+    $env = (string) file_get_contents($this->envPath);
+
+    expect($env)->toContain('VITE_SENTRY_ENVIRONMENT="${APP_ENV}"')
+        ->and($env)->not->toContain('\\${APP_ENV}');
+});
+
+it('lists detected Vite entries when laravel({ input: [...] }) is parseable', function (): void {
+    file_put_contents(base_path('vite.config.js'), <<<'JS'
+        export default {
+            plugins: [
+                laravel({ input: ['resources/js/app.js', 'resources/css/app.css'] }),
+            ],
+        };
+        JS);
+
+    $this->artisan('watchtower:install', ['--dsn' => 'http://abc@watchtower.test/42'])
+        ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
+        ->expectsOutputToContain('Detected Vite entries (1)')
+        ->expectsOutputToContain('resources/js/app.js')
+        ->assertExitCode(0);
+});
+
+it('lists detected Blade layouts containing <head>', function (): void {
+    file_put_contents(base_path('vite.config.js'), "export default {};\n");
+
+    @mkdir(resource_path('views/components/layouts'), 0777, true);
+    file_put_contents(
+        resource_path('views/components/layouts/app.blade.php'),
+        '<html><head></head><body>{{ $slot }}</body></html>'
+    );
+
+    $this->artisan('watchtower:install', ['--dsn' => 'http://abc@watchtower.test/42'])
+        ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
+        ->expectsOutputToContain('Detected Blade layouts (1)')
+        ->expectsOutputToContain('resources/views/components/layouts/app.blade.php')
+        ->assertExitCode(0);
+
+    @unlink(resource_path('views/components/layouts/app.blade.php'));
+    @rmdir(resource_path('views/components/layouts'));
+    @rmdir(resource_path('views/components'));
+    @rmdir(resource_path('views'));
+});
+
+it('--patch-js injects the Sentry init block into detected entries', function (): void {
+    file_put_contents(base_path('vite.config.js'), <<<'JS'
+        export default {
+            plugins: [
+                laravel({ input: ['resources/js/app.js'] }),
+            ],
+        };
+        JS);
+
+    @mkdir(resource_path('js'), 0777, true);
+    file_put_contents(resource_path('js/app.js'), "console.log('hi');\n");
+
+    $this->artisan('watchtower:install', [
+        '--dsn'      => 'http://abc@watchtower.test/42',
+        '--patch-js' => true,
+    ])
+        ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
+        ->expectsOutputToContain('resources/js/app.js (patched)')
+        ->assertExitCode(0);
+
+    $contents = (string) file_get_contents(resource_path('js/app.js'));
+
+    expect($contents)->toContain('// watchtower:sentry-init')
+        ->and($contents)->toContain('applyWatchtowerUser();')
+        ->and($contents)->toEndWith("console.log('hi');\n");
+
+    @unlink(resource_path('js/app.js'));
+});
+
+it('--patch-views injects the meta tags into detected layouts', function (): void {
+    file_put_contents(base_path('vite.config.js'), "export default {};\n");
+
+    @mkdir(resource_path('views/components/layouts'), 0777, true);
+    file_put_contents(
+        resource_path('views/components/layouts/app.blade.php'),
+        "<html>\n<head>\n    <title>App</title>\n</head>\n<body>{{ \$slot }}</body>\n</html>\n"
+    );
+
+    $this->artisan('watchtower:install', [
+        '--dsn'         => 'http://abc@watchtower.test/42',
+        '--patch-views' => true,
+    ])
+        ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
+        ->expectsOutputToContain('app.blade.php (patched)')
+        ->assertExitCode(0);
+
+    $contents = (string) file_get_contents(resource_path('views/components/layouts/app.blade.php'));
+
+    expect($contents)->toContain('{{-- watchtower:user-meta --}}')
+        ->and($contents)->toContain('<meta name="watchtower-user-id"');
+
+    @unlink(resource_path('views/components/layouts/app.blade.php'));
+    @rmdir(resource_path('views/components/layouts'));
+    @rmdir(resource_path('views/components'));
+    @rmdir(resource_path('views'));
+});
+
+it('prints a Filament render-hook block when a panel provider exists', function (): void {
+    file_put_contents(base_path('vite.config.js'), "export default {};\n");
+
+    @mkdir(base_path('app/Providers/Filament'), 0777, true);
+    file_put_contents(base_path('app/Providers/Filament/AdminPanelProvider.php'), "<?php\n");
+
+    $this->artisan('watchtower:install', ['--dsn' => 'http://abc@watchtower.test/42'])
+        ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
+        ->expectsOutputToContain('Detected Filament panel providers (1)')
+        ->expectsOutputToContain('AdminPanelProvider.php')
+        ->expectsOutputToContain("renderHook(")
+        ->assertExitCode(0);
+
+    @unlink(base_path('app/Providers/Filament/AdminPanelProvider.php'));
+    @rmdir(base_path('app/Providers/Filament'));
+    @rmdir(base_path('app/Providers'));
+    @rmdir(base_path('app'));
+});

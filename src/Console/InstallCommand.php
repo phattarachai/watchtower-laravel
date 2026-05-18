@@ -9,6 +9,10 @@ use Phattarachai\WatchtowerLaravel\Support\BootstrapPatcher;
 use Phattarachai\WatchtowerLaravel\Support\ClaudeMcpRegistrar;
 use Phattarachai\WatchtowerLaravel\Support\Dsn;
 use Phattarachai\WatchtowerLaravel\Support\EnvWriter;
+use Phattarachai\WatchtowerLaravel\Support\FilamentPanelDetector;
+use Phattarachai\WatchtowerLaravel\Support\FrontendPatcher;
+use Phattarachai\WatchtowerLaravel\Support\LayoutDetector;
+use Phattarachai\WatchtowerLaravel\Support\ViteEntryDetector;
 use Symfony\Component\Console\Output\OutputInterface;
 
 class InstallCommand extends Command
@@ -27,7 +31,9 @@ class InstallCommand extends Command
     protected $signature = 'watchtower:install
         {--dsn= : Watchtower DSN, e.g. http://key@host/42}
         {--dry-run : Print intended changes without writing files}
-        {--no-mcp : Skip registering the Watchtower MCP server with Claude Code}';
+        {--no-mcp : Skip registering the Watchtower MCP server with Claude Code}
+        {--patch-js : Auto-inject the Sentry init snippet into detected Vite entries}
+        {--patch-views : Auto-inject the watchtower-user-* meta tags into detected layouts}';
 
     protected $description = 'Wire up Watchtower error tracking: DSN, exception handler, frontend tunnel, Claude MCP.';
 
@@ -250,9 +256,9 @@ class InstallCommand extends Command
 
     private function configureFrontend(string $dsn, bool $dryRun): void
     {
-        $hasVite = is_file(base_path('vite.config.js')) || is_file(base_path('vite.config.ts'));
+        $viteDetector = new ViteEntryDetector(base_path());
 
-        if (! $hasVite) {
+        if ($viteDetector->configPath() === null) {
             return;
         }
 
@@ -263,73 +269,191 @@ class InstallCommand extends Command
             return;
         }
 
+        $this->writeFrontendEnvKeys($dsn);
+
+        // --force false so re-running install doesn't overwrite user edits to the helper.
+        $this->call('vendor:publish', ['--tag' => 'watchtower-js', '--force' => false]);
+
+        $this->emitFrontendPlacement($viteDetector);
+    }
+
+    private function writeFrontendEnvKeys(string $dsn): void
+    {
         $env = new EnvWriter(base_path('.env'));
         $env->set('VITE_SENTRY_DSN', $dsn);
         $env->set('VITE_SENTRY_TUNNEL', '/api/watchtower-relay');
-        $env->set('VITE_SENTRY_ENVIRONMENT', '${APP_ENV}');
+        $env->set('VITE_SENTRY_ENVIRONMENT', '${APP_ENV}', raw: true);
 
         if (is_file(base_path('.env.example'))) {
             $example = new EnvWriter(base_path('.env.example'));
             $example->set('VITE_SENTRY_DSN', '');
             $example->set('VITE_SENTRY_TUNNEL', '/api/watchtower-relay');
-            $example->set('VITE_SENTRY_ENVIRONMENT', '${APP_ENV}');
+            $example->set('VITE_SENTRY_ENVIRONMENT', '${APP_ENV}', raw: true);
         }
 
         $this->info('Wrote VITE_SENTRY_* keys to .env');
+    }
 
-        // --force false so re-running install doesn't overwrite user edits to the helper.
-        $this->call('vendor:publish', ['--tag' => 'watchtower-js', '--force' => false]);
+    private function emitFrontendPlacement(ViteEntryDetector $viteDetector): void
+    {
+        $jsEntries  = $viteDetector->jsEntries();
+        $layouts    = (new LayoutDetector(base_path()))->layouts();
+        $panels     = (new FilamentPanelDetector(base_path()))->panels();
+        $patchJs    = (bool) $this->option('patch-js');
+        $patchViews = (bool) $this->option('patch-views');
 
-        // Snippets contain literal '<' / '>' (Blade tags, JSX-style imports) — emit
-        // as raw so Symfony's OutputFormatter doesn't parse them as styles. Each
-        // line is a separate writeln so testing tools see one assertion per line.
-        $this->output->writeln('Add to your Vite entry (e.g. resources/js/app.js):', OutputInterface::OUTPUT_RAW);
-        $this->writeRawLines(<<<'JS'
+        $this->emitJsBlock($jsEntries, $patchJs);
+        $this->emitBladeBlock($layouts, $patchViews);
+        $this->emitFilamentBlock($panels);
+    }
 
-            import * as Sentry from '@sentry/browser';
-            import { applyWatchtowerUser } from './vendor/watchtower-user-context.js';
+    /**
+     * @param  list<string>  $entries
+     */
+    private function emitJsBlock(array $entries, bool $patch): void
+    {
+        $this->output->writeln('', OutputInterface::OUTPUT_RAW);
 
-            if (import.meta.env.VITE_SENTRY_DSN) {
-                Sentry.init({
-                    dsn: import.meta.env.VITE_SENTRY_DSN,
-                    tunnel: import.meta.env.VITE_SENTRY_TUNNEL,
-                    environment: import.meta.env.VITE_SENTRY_ENVIRONMENT,
-                    sendDefaultPii: false,
-                    tracesSampleRate: 0,
-                    denyUrls: [
-                        /^chrome-extension:\/\//i,
-                        /^moz-extension:\/\//i,
-                        /^safari-extension:\/\//i,
-                        /^safari-web-extension:\/\//i,
-                    ],
-                    // Uncomment to suppress common browser noise once you've
-                    // confirmed it isn't masking real issues in your app:
-                    // ignoreErrors: [
-                    //     'ResizeObserver loop limit exceeded',
-                    //     'ResizeObserver loop completed with undelivered notifications',
-                    //     'Script error.',
-                    //     'Non-Error promise rejection captured',
-                    //     'Network request failed',
-                    //     'NetworkError',
-                    //     'Failed to fetch',
-                    //     'Load failed',
-                    //     'top.GLOBALS',
-                    //     'fb_xd_fragment',
-                    // ],
-                });
-                applyWatchtowerUser();
-            }
+        if ($entries === []) {
+            $this->output->writeln('No Vite JS entries detected from vite.config — paste the snippet below into your JS entry manually:', OutputInterface::OUTPUT_RAW);
+            $this->writeRawSnippet(FrontendPatcher::renderJsSnippet());
 
-            JS);
+            return;
+        }
 
-        $this->output->writeln('Paste into your root Blade layout <head> so browser exceptions know who is logged in:', OutputInterface::OUTPUT_RAW);
-        $this->writeRawLines(<<<'BLADE'
+        $this->output->writeln(sprintf('Detected Vite entries (%d) — add the marked block to the top of each:', count($entries)), OutputInterface::OUTPUT_RAW);
 
-            <meta name="watchtower-user-id" content="{{ auth()->id() ?? '' }}">
-            <meta name="watchtower-user-email" content="{{ auth()->user()?->email ?? '' }}">
-            <meta name="watchtower-user-name" content="{{ auth()->user()?->name ?? '' }}">
+        foreach ($entries as $entry) {
+            $absolute = base_path($entry);
+            $status   = $patch ? $this->patchJsAndReport($absolute) : $this->describeJsState($absolute);
 
-            BLADE);
+            $this->output->writeln('  • '.$entry.$status, OutputInterface::OUTPUT_RAW);
+        }
+
+        if (! $patch) {
+            $this->writeRawSnippet(FrontendPatcher::renderJsSnippet());
+            $this->output->writeln('Re-run with --patch-js to inject the block above into every detected entry.', OutputInterface::OUTPUT_RAW);
+        }
+    }
+
+    /**
+     * @param  list<string>  $layouts
+     */
+    private function emitBladeBlock(array $layouts, bool $patch): void
+    {
+        $this->output->writeln('', OutputInterface::OUTPUT_RAW);
+
+        if ($layouts === []) {
+            $this->output->writeln('No Blade layouts with <head> detected — paste the snippet below into your root layout manually:', OutputInterface::OUTPUT_RAW);
+            $this->writeRawSnippet(FrontendPatcher::renderBladeSnippet());
+
+            return;
+        }
+
+        $this->output->writeln(sprintf('Detected Blade layouts (%d) — insert the marked block inside <head>:', count($layouts)), OutputInterface::OUTPUT_RAW);
+
+        foreach ($layouts as $layout) {
+            $absolute = base_path($layout);
+            $status   = $patch ? $this->patchBladeAndReport($absolute) : $this->describeBladeState($absolute);
+
+            $this->output->writeln('  • '.$layout.$status, OutputInterface::OUTPUT_RAW);
+        }
+
+        if (! $patch) {
+            $this->writeRawSnippet(FrontendPatcher::renderBladeSnippet());
+            $this->output->writeln('Re-run with --patch-views to inject the block above into every detected layout.', OutputInterface::OUTPUT_RAW);
+        }
+    }
+
+    /**
+     * @param  list<string>  $panels
+     */
+    private function emitFilamentBlock(array $panels): void
+    {
+        if ($panels === []) {
+            return;
+        }
+
+        $this->output->writeln('', OutputInterface::OUTPUT_RAW);
+        $this->output->writeln(sprintf('Detected Filament panel providers (%d) — Filament admin pages do not use the Blade layouts above.', count($panels)), OutputInterface::OUTPUT_RAW);
+
+        foreach ($panels as $panel) {
+            $this->output->writeln('  • '.$panel, OutputInterface::OUTPUT_RAW);
+        }
+
+        $this->output->writeln('Register a render hook in each panel provider to emit the same meta tags inside Filament <head>:', OutputInterface::OUTPUT_RAW);
+        $this->writeRawSnippet(<<<'PHP'
+            use Filament\View\PanelsRenderHook;
+            use Illuminate\Support\Facades\Blade;
+
+            $panel->renderHook(
+                PanelsRenderHook::HEAD_END,
+                fn (): string => Blade::render(<<<'BLADE'
+                    <meta name="watchtower-user-id" content="{{ auth()->id() ?? '' }}">
+                    <meta name="watchtower-user-email" content="{{ auth()->user()?->email ?? '' }}">
+                    <meta name="watchtower-user-name" content="{{ auth()->user()?->name ?? '' }}">
+                BLADE),
+            );
+            PHP);
+    }
+
+    private function describeJsState(string $absolutePath): string
+    {
+        if (! is_file($absolutePath)) {
+            return ' (missing on disk — create it first)';
+        }
+
+        $contents = (string) file_get_contents($absolutePath);
+
+        return str_contains($contents, FrontendPatcher::MARKER_JS_OPEN) ? ' (already patched)' : '';
+    }
+
+    private function describeBladeState(string $absolutePath): string
+    {
+        if (! is_file($absolutePath)) {
+            return ' (missing on disk)';
+        }
+
+        $contents = (string) file_get_contents($absolutePath);
+
+        return str_contains($contents, FrontendPatcher::MARKER_BLADE_OPEN) ? ' (already patched)' : '';
+    }
+
+    private function patchJsAndReport(string $absolutePath): string
+    {
+        if (! is_file($absolutePath)) {
+            return ' (skipped — file missing)';
+        }
+
+        $contents = (string) file_get_contents($absolutePath);
+
+        if (str_contains($contents, FrontendPatcher::MARKER_JS_OPEN)) {
+            return ' (already patched)';
+        }
+
+        return FrontendPatcher::patchJsEntry($absolutePath) ? ' (patched)' : ' (patch failed)';
+    }
+
+    private function patchBladeAndReport(string $absolutePath): string
+    {
+        if (! is_file($absolutePath)) {
+            return ' (skipped — file missing)';
+        }
+
+        $contents = (string) file_get_contents($absolutePath);
+
+        if (str_contains($contents, FrontendPatcher::MARKER_BLADE_OPEN)) {
+            return ' (already patched)';
+        }
+
+        return FrontendPatcher::patchBladeLayout($absolutePath) ? ' (patched)' : ' (patch failed — no </head> found)';
+    }
+
+    private function writeRawSnippet(string $snippet): void
+    {
+        $this->output->writeln('', OutputInterface::OUTPUT_RAW);
+        $this->writeRawLines($snippet);
+        $this->output->writeln('', OutputInterface::OUTPUT_RAW);
     }
 
     private function writeRawLines(string $block): void
