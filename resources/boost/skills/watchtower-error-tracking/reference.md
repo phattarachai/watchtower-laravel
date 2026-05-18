@@ -1,7 +1,7 @@
 ---
 name: watchtower-error-tracking-reference
-description: End-to-end install reference for wiring Watchtower error tracking into a new project. Covers Laravel backends (via the phattarachai/watchtower-laravel package, one command), browser JavaScript frontends (via @sentry/browser with the tunnel option), the verify-via-REST flow, the team-scoped MCP server for in-conversation triage from Claude Code, and troubleshooting. Read this when SKILL.md directs you here, or when the user wants to install, configure, verify, triage, or troubleshoot Watchtower error tracking.
-version: 2026.05.18
+description: End-to-end install reference for wiring Watchtower error tracking into a new project. Covers Laravel backends (via the phattarachai/watchtower-laravel package, one command — including the package's smart defaults: multi-guard user-context middleware, BeforeSend noise filter + secret scrubbing, breadcrumb env keys), browser JavaScript frontends (via @sentry/browser with the tunnel option and the published applyWatchtowerUser helper), the verify-via-REST flow, the team-scoped MCP server for in-conversation triage from Claude Code, and troubleshooting. Read this when SKILL.md directs you here, or when the user wants to install, configure, verify, triage, or troubleshoot Watchtower error tracking.
+version: 2026.05.18.1
 ---
 
 # Watchtower install — reference
@@ -48,13 +48,18 @@ php artisan watchtower:install
 
 The package is published at <https://packagist.org/packages/phattarachai/watchtower-laravel> (GitHub source: <https://github.com/phattarachai/watchtower-laravel>).
 
-`watchtower:install` does five things:
+`watchtower:install` does eight things:
 
 1. **Resolves the DSN.** From `--dsn=…`, then `WATCHTOWER_DSN`, then `SENTRY_LARAVEL_DSN`, otherwise prompts. Validates the DSN format (numeric project id required).
 2. **Writes env keys.** Sets `WATCHTOWER_DSN` and `SENTRY_LARAVEL_DSN` in `.env`. Empty in `.env.example`. For `APP_ENV=local`, prompts whether to use `null` (recommended — don't flood Watchtower from dev).
 3. **Patches `bootstrap/app.php`.** Adds `use Sentry\Laravel\Integration;` and inserts `Integration::handles($exceptions);` inside `withExceptions(...)`. **Critical** — without this, unhandled exceptions in HTTP requests, jobs, and commands never reach Watchtower. If the package can't recognize the file's shape, it prints the diff and bails — apply it by hand.
-4. **Publishes `config/watchtower.php`.** Knobs: relay path, timeout, async forwarding flag, queue name.
+4. **Publishes `config/watchtower.php`.** Knobs: relay path, timeout, async forwarding flag, queue name, plus the `user_context` + `before_send` sections that power the [Smart defaults](#smart-defaults).
 5. **Detects Vite.** If `vite.config.{js,ts}` exists, writes `VITE_SENTRY_DSN` (same value as `SENTRY_LARAVEL_DSN`), `VITE_SENTRY_TUNNEL=/api/watchtower-relay`, and `VITE_SENTRY_ENVIRONMENT="${APP_ENV}"` to `.env` and `.env.example`. Prints the `Sentry.init(...)` snippet to paste into the entry JS file (see [Browser-side init](#browser-side-init) below). To point the browser side at a *different* Watchtower project, edit `VITE_SENTRY_DSN` in `.env` after install — see [When to split into two projects](#when-to-split-into-two-projects).
+6. **Confirms `SENTRY_SEND_DEFAULT_PII`.** Prompts `Enable SENTRY_SEND_DEFAULT_PII (attach request data + IP — Watchtower scrubs secrets via BeforeSend)?` — default `yes` for non-local envs, `no` for `APP_ENV=local`. Writes `SENTRY_SEND_DEFAULT_PII=true|false`. Without PII the SDK strips the request body + IP before any local filter sees them — the User tab and Request tab in Watchtower stay empty. `BeforeSend` (step 4 config) is the scrubbing safety net that makes it safe to leave on in production.
+7. **Writes Sentry breadcrumb env keys** (only when absent — re-runs preserve customization): `SENTRY_BREADCRUMBS_SQL_QUERIES_ENABLED=true`, `SENTRY_BREADCRUMBS_SQL_BINDINGS_ENABLED=false` (bindings can leak PII even after scrubbing — opt in if you need them), `SENTRY_BREADCRUMBS_CACHE_ENABLED=true`, `SENTRY_BREADCRUMBS_HTTP_CLIENT_REQUESTS_ENABLED=true`, `SENTRY_BREADCRUMBS_REDIS_COMMANDS_ENABLED=true`. Result: events arrive with the last ~100 query/cache/HTTP/Redis ops in Watchtower's Breadcrumbs tab.
+8. **Publishes the browser user-context helper** (Vite path only). Calls `vendor:publish --tag=watchtower-js --force=false` → drops `resources/js/vendor/watchtower-user-context.js`. The printed `Sentry.init(...)` snippet imports and calls `applyWatchtowerUser()` from this file; a separate `<meta name="watchtower-user-*">` snippet is printed for the root Blade layout. See [Browser user context](#browser-user-context) below.
+
+Then it registers the team-scoped MCP server with Claude Code if the `claude` CLI is on PATH (see [Querying via MCP](#querying-via-mcp)).
 
 Flags:
 - `--dsn=…` — Watchtower DSN. Skips the prompt.
@@ -91,6 +96,99 @@ Opt in to async by setting `WATCHTOWER_RELAY_ASYNC=true` — the relay dispatche
 | `WATCHTOWER_RELAY_TIMEOUT` | `5` | Guzzle request timeout (seconds). |
 | `WATCHTOWER_CONNECT_TIMEOUT` | `3` | Guzzle connect timeout (seconds, float). |
 | `WATCHTOWER_VERIFY_SSL` | `true` | Disable for self-signed dev Watchtower instances only. |
+| `WATCHTOWER_USER_CONTEXT` | `true` | Set `false` to disable the auto-pushed [user context middleware](#user-context-middleware) entirely. |
+| `WATCHTOWER_USER_CONTEXT_GUARDS` | `auto` | `auto` walks `array_keys(config('auth.guards'))`; or a comma-separated list (`web,admin,api`) to fix priority and narrow the set. First authenticated guard wins. |
+| `WATCHTOWER_BEFORE_SEND` | `true` | Set `false` to skip the [BeforeSend pipeline](#beforesend-pipeline) (no noise drop, no scrubbing). |
+| `SENTRY_SEND_DEFAULT_PII` | (prompted at install) | Sentry SDK key. With it on, request body + IP attach to events (Watchtower's BeforeSend is the safety net that strips secrets). Without it, User tab + Request tab stay empty. |
+| `SENTRY_BREADCRUMBS_SQL_QUERIES_ENABLED` | (`true` after install) | Sentry SDK key. Attach SQL query crumbs. |
+| `SENTRY_BREADCRUMBS_SQL_BINDINGS_ENABLED` | (`false` after install) | Sentry SDK key. Bindings can leak PII even after scrubbing — opt in deliberately. |
+| `SENTRY_BREADCRUMBS_CACHE_ENABLED` | (`true` after install) | Sentry SDK key. Cache get/set crumbs. |
+| `SENTRY_BREADCRUMBS_HTTP_CLIENT_REQUESTS_ENABLED` | (`true` after install) | Sentry SDK key. Outbound HTTP crumbs via Laravel's HTTP client. |
+| `SENTRY_BREADCRUMBS_REDIS_COMMANDS_ENABLED` | (`true` after install) | Sentry SDK key. Redis command crumbs. |
+
+Two more knobs live in `config/watchtower.php` only (arrays — too much for an env var): `watchtower.user_context.fields` (see [User context middleware](#user-context-middleware) below) and `watchtower.before_send.{ignored_exceptions, scrub_keys}` (see [BeforeSend pipeline](#beforesend-pipeline) below).
+
+## Smart defaults
+
+Out of the box, `watchtower:install` produces events that already populate Watchtower's User tab, hide framework noise from the inbox, and never leak secrets in request bodies / headers. Each behavior is reversible via env or config.
+
+### User context middleware
+
+`Phattarachai\WatchtowerLaravel\Http\Middleware\WatchtowerUserContext` is auto-pushed onto both the `web` and `api` route groups when the service provider boots (unless `WATCHTOWER_USER_CONTEXT=false`). On every request it:
+
+1. Walks the configured guards in order — `config('auth.guards')` keys when `WATCHTOWER_USER_CONTEXT_GUARDS=auto`, or the explicit comma-separated list when set (`web,admin,api`).
+2. First authenticated guard wins. The middleware grabs the `Authenticatable` and remembers the guard name.
+3. Builds a payload and calls `\Sentry\configureScope(fn ($scope) => $scope->setUser($payload)->setTag('auth.guard', $guard))`.
+
+Payload behavior depends on `watchtower.user_context.fields`:
+
+- **`[]` (default — auto-discover)** — every attribute on the user model except (a) anything in the model's `$hidden` array and (b) the package's hard-coded deny-list (`password`, `password_hash`, `remember_token`, `api_token`, `two_factor_secret`, `two_factor_recovery_codes`). `id` falls back to `getAuthIdentifier()` (survives renamed primary keys), `ip_address` always comes from `$request->ip()`. The `name` column is mapped to Sentry's `username` (Sentry's user schema uses `username` for the display name, not `name`).
+- **Explicit list (`['id', 'email']`)** — only those fields. Allowed values: `id`, `email`, `name` (mapped to `username`), `ip_address`.
+
+The middleware swallows exceptions from broken auth drivers — a misconfigured guard never breaks a request, it just means the User tab won't populate for that request.
+
+Result in Watchtower: `IssueDetail` → User tab shows id / email / username / ip rows; Custom tab shows the `auth.guard` pill. Multi-guard apps (web humans + API mobile clients + admin back-office) get an at-a-glance signal of which surface produced the exception.
+
+### BeforeSend pipeline
+
+`Phattarachai\WatchtowerLaravel\Sentry\BeforeSend` is chained in front of any existing `before_send` callback from `config/sentry.php` at service-provider boot. Composition order: ours runs first (drop + scrub); if the event survives, the user's existing callback runs after. Either can return `null` to drop.
+
+Two responsibilities:
+
+**Drop framework noise.** If the event's hinted exception is an instance of any class in `watchtower.before_send.ignored_exceptions`, the event is dropped (returns `null`). Defaults:
+
+```
+Illuminate\Validation\ValidationException
+Illuminate\Auth\AuthenticationException
+Illuminate\Auth\Access\AuthorizationException
+Illuminate\Database\Eloquent\ModelNotFoundException
+Illuminate\Session\TokenMismatchException
+Symfony\Component\HttpKernel\Exception\NotFoundHttpException
+Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException
+Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException
+Symfony\Component\HttpFoundation\Exception\SuspiciousOperationException
+```
+
+Laravel's HTTP handler already excludes most of these via `$internalDontReport`, but the BeforeSend list is belt-and-braces — it also catches direct `\Sentry\captureException()` calls from queue jobs or console code that bypasses the HTTP handler. Extend per project. Don't subtract unless you actually want validation / auth-fail / 404 noise in the inbox.
+
+**Scrub secrets.** For each event that survives the drop check, the middleware walks `event.request.data`, `event.request.headers`, `event.request.cookies`, and `event.extra`. For each entry whose key (case-insensitive) matches `watchtower.before_send.scrub_keys`, the value becomes the literal string `[Filtered]`. Defaults:
+
+```
+password, password_confirmation, current_password,
+token, api_key, secret, authorization, cookie,
+credit_card, card, cvv, cvc
+```
+
+Then a credit-card-shape regex (`/\b\d(?:[ -]?\d){12,18}\b/`) sweeps the remaining string values and replaces any 13–19-digit number with `[Filtered]`. Intentionally permissive — false positives just redact an innocent number; false negatives leak a real card.
+
+Result in Watchtower: matching exceptions never reach the inbox at all. Surviving events render the literal string `[Filtered]` in the Request tab's headers `<dl>` and body `<pre>`.
+
+To extend either list, publish `config/watchtower.php` and edit the arrays directly. Both are merged from the package defaults at boot, so a published copy is the full picture.
+
+### Breadcrumb env keys
+
+`watchtower:install` writes five `SENTRY_BREADCRUMBS_*` env keys on first run (`setIfAbsent` — re-runs preserve user customization):
+
+| Env key | Default after install | Why |
+|---|---|---|
+| `SENTRY_BREADCRUMBS_SQL_QUERIES_ENABLED` | `true` | The query itself is the highest-signal breadcrumb when triaging a DB-shaped exception. |
+| `SENTRY_BREADCRUMBS_SQL_BINDINGS_ENABLED` | `false` | Bindings carry the actual user data — emails, IDs, sometimes free text. Even with BeforeSend scrubbing, prefer off by default. Opt in when bindings are essential. |
+| `SENTRY_BREADCRUMBS_CACHE_ENABLED` | `true` | Cache key + hit/miss is cheap and useful. |
+| `SENTRY_BREADCRUMBS_HTTP_CLIENT_REQUESTS_ENABLED` | `true` | Outbound HTTP calls via Laravel's HTTP client; URL + status + duration. |
+| `SENTRY_BREADCRUMBS_REDIS_COMMANDS_ENABLED` | `true` | Redis commands (excluding payloads); useful for queue / cache / lock debugging. |
+
+Set any specific key to `false` in `.env` to disable that family without disabling the rest.
+
+### Browser user context
+
+The install command publishes `resources/js/vendor/watchtower-user-context.js` and prints two snippets to paste:
+
+1. Updated `Sentry.init(...)` block — imports `applyWatchtowerUser` from the published helper and calls it after `Sentry.init`. The helper reads `<meta name="watchtower-user-{id,email,name}">` from the document and calls `Sentry.setUser({id, email, username})` with whatever values are present (no-op when no meta tags are found).
+2. `<meta name="watchtower-user-*">` block — paste into the root Blade layout's `<head>`, rendered from `auth()->id() / ->user()?->email / ->user()?->name`.
+
+The result: browser-side exceptions get the same User tab population as server-side, with the same `id`/`email`/`username` mapping.
+
+The published helper is yours to edit — `--force=false` on re-runs means customizations are preserved. The package version is the source of truth in `vendor/phattarachai/watchtower-laravel/resources/js/watchtower-user-context.js`.
 
 ### Recommended `.env` per environment
 
@@ -106,10 +204,13 @@ For the rare cases that warrant splitting backend and frontend into two Watchtow
 
 ## Browser-side init
 
-The install command writes the env keys but does NOT modify your entry JS file — that one-time paste is on you. In `resources/js/app.js` (or wherever your bundler entry is), add at the top:
+The install command writes the env keys, publishes the user-context helper, and prints two snippets — but does NOT modify your entry JS file or your Blade layout. Those one-time pastes are on you.
+
+In `resources/js/app.js` (or wherever your bundler entry is), add at the top:
 
 ```javascript
 import * as Sentry from '@sentry/browser';
+import { applyWatchtowerUser } from './vendor/watchtower-user-context.js';
 
 if (import.meta.env.VITE_SENTRY_DSN) {
     Sentry.init({
@@ -118,8 +219,41 @@ if (import.meta.env.VITE_SENTRY_DSN) {
         environment: import.meta.env.VITE_SENTRY_ENVIRONMENT ?? 'production',
         tracesSampleRate: 0,
         sendDefaultPii: false,
+
+        // Drop noise from browser extensions, sandboxed iframes, and known
+        // ad-blocker injection points. Safe to keep on; rarely a false positive.
+        denyUrls: [
+            /extensions\//i,
+            /^chrome:\/\//i,
+            /^chrome-extension:\/\//i,
+            /^moz-extension:\/\//i,
+            /^safari-extension:\/\//i,
+            /^safari-web-extension:\/\//i,
+        ],
+
+        // ignoreErrors: [
+        //     // Network noise that's the user's connection, not your bug:
+        //     'Network request failed',
+        //     'NetworkError',
+        //     'Failed to fetch',
+        //     // Benign ResizeObserver chatter from layout shifts:
+        //     'ResizeObserver loop limit exceeded',
+        //     'ResizeObserver loop completed with undelivered notifications',
+        //     // Safari quirks:
+        //     'Non-Error promise rejection captured',
+        // ],
     });
+
+    applyWatchtowerUser();
 }
+```
+
+Then in your root Blade layout's `<head>` — `resources/views/components/layouts/app.blade.php` or equivalent — paste:
+
+```blade
+<meta name="watchtower-user-id" content="{{ auth()->id() ?? '' }}">
+<meta name="watchtower-user-email" content="{{ auth()->user()?->email ?? '' }}">
+<meta name="watchtower-user-name" content="{{ auth()->user()?->name ?? '' }}">
 ```
 
 Then:
@@ -129,7 +263,7 @@ npm install --save @sentry/browser
 npm run build
 ```
 
-The `tunnel` option is non-negotiable for production deployments. Without it, ~10–30% of users with ad blockers will silently fail to report errors.
+The `tunnel` option is non-negotiable for production deployments. Without it, ~10–30% of users with ad blockers will silently fail to report errors. The `applyWatchtowerUser()` call after `Sentry.init` is what fills Watchtower's User tab for browser-side exceptions — without it, you get the same User tab population gap on the browser side that disabling the middleware causes on the server side. Leave `ignoreErrors` commented at first; turn individual lines on once you've seen the actual noise in your project's Watchtower inbox.
 
 ### Verify the browser side
 
@@ -258,8 +392,8 @@ Errors: standard Laravel `{"message": "...", "errors": {...}}` shape; 401 unauth
 | GET | `/api/v1/issues` | List issue groups. Filters: `environment`, `level`, `status`, `fingerprint`, `since` (`24h`/`7d` or ISO), `q`. |
 | GET | `/api/v1/issues/{id}` | Show one issue group. |
 | PATCH | `/api/v1/issues/{id}` | Triage. Body: `{"status":"resolved"}` etc. Snooze requires `snooze_duration`. |
-| GET | `/api/v1/events` | List recent events. Filters: `environment`, `release`, `level`, `since`, `group_id`. |
-| GET | `/api/v1/events/{event_id}` | Verification core — lookup by Sentry envelope event_id (UUID). |
+| GET | `/api/v1/events` | List recent events (slim shape — id, level, env, top_frame). Filters: `environment`, `release`, `level`, `since`, `group_id`. Pagination: `page`, `per_page` (1–100, default 25). |
+| GET | `/api/v1/events/{event_id}` | Full event payload (stacktrace frames, breadcrumbs, request, contexts, tags, extra, sdk, mechanism) — verification core AND debugging entry point. |
 
 ### Examples
 
@@ -327,9 +461,9 @@ For a team with both a Laravel backend and a JS frontend, either project's DSN k
 | `get_team` | — | Team summary + projects array (`id`, `slug`, `name`, `platform`, `retention_days`, `team`) |
 | `get_stats` | `project?`, `window?` (`24h`/`7d`/`30d`, default `7d`) | Event volume + per-project + per-level breakdown + top-5 issues in window + status_mix |
 | `list_issues` | `project?`, `status?`, `environment?`, `level?`, `q?`, `since?`, `page?` | Paginated issue groups across the team, newest-seen first |
-| `get_issue` | `issue_id` | One issue group + permalink to the Watchtower UI |
-| `list_events` | `project?`, `environment?`, `release?`, `level?`, `group_id?`, `since?`, `page?` | Paginated events across the team, newest first |
-| `get_event` | `event_id` (UUID) | One event — the **verification core** |
+| `get_issue` | `issue_id` | One issue group + permalink to the Watchtower UI + **`latest_event_id`** (skip the `list_events` round-trip — feed it straight to `get_event`) |
+| `list_events` | `project?`, `environment?`, `release?`, `level?`, `group_id?`, `since?`, `page?`, `per_page?` (1–100, default 25) | Paginated events across the team (slim shape — id, level, env, top_frame), newest first |
+| `get_event` | `event_id` (UUID) | **Full event payload** — slim fields plus `stacktrace` frames, `breadcrumbs`, `request`, `contexts`, `tags`, `extra`, `sdk`, `mechanism`. Verification core AND debugging entry point. |
 | `resolve_issue` | `issue_id` | Marks resolved; re-opens automatically on regression in a higher release |
 | `ignore_issue` | `issue_id` | Marks ignored; does NOT re-open on new events |
 | `unresolve_issue` | `issue_id` | Re-opens a resolved or ignored issue |
@@ -341,7 +475,17 @@ After capturing an exception in the client app, ask Claude:
 
 > "Use Watchtower to verify event_id `<uuid>` arrived."
 
-Claude calls `get_event`. Success → ingested. An error response saying *"Event not found in this team. The ingest pipeline is async — retry after a few seconds…"* → the queue hasn't drained yet, try again in a moment.
+Claude calls `get_event`. Success → ingested (and the response includes the full stacktrace + breadcrumbs, so the same call doubles as a debugging starting point). An error response saying *"Event not found in this team. The ingest pipeline is async — retry after a few seconds…"* → the queue hasn't drained yet, try again in a moment.
+
+### Debug an issue end-to-end via MCP
+
+The common "fix issue N in project X" flow is a 2-call path:
+
+> "Fix Watchtower issue #44 in project `acme-web`."
+
+1. `get_issue(issue_id=44)` — title, status, counts, permalink, **and `latest_event_id`**.
+2. `get_event(event_id=<latest_event_id>)` — full payload. The agent now has the stacktrace (with `in_app` flags), breadcrumbs (the user actions leading up to the error), request URL/method, contexts, tags, and SDK info needed to open the right file and propose a fix.
+3. After the fix lands and is verified, `resolve_issue(issue_id=44)`. Watchtower auto-reopens the issue if a new event arrives in a later release.
 
 ### Privilege scope
 
@@ -365,6 +509,9 @@ DSN holder gets read **and** mutate access across the whole team. Per-user / per
 | `/api/v1/events/{id}` returns 404 right after sending | Async ingestion hasn't drained yet | Retry after 2–5s |
 | MCP: `claude mcp add` succeeds but tool calls fail with `Unauthenticated` | Bearer token revoked / wrong DSN | Re-copy DSN from project settings; re-run `claude mcp add` |
 | MCP: tool says "Issue not found in this team" but the issue is visible in the Watchtower UI | The issue belongs to a project under a different team than the DSN key you registered | Use a DSN key from the right team, or move the project to this team via team settings |
+| User tab in Watchtower is empty despite a logged-in user triggering the exception | Smart-defaults chain broken at one of three points | Check (a) `SENTRY_SEND_DEFAULT_PII=true` — without it Sentry strips request data + IP before BeforeSend runs; (b) `WATCHTOWER_USER_CONTEXT` not set to `false`; (c) the right guard is listed in `WATCHTOWER_USER_CONTEXT_GUARDS` (or it's `auto`); (d) for browser-side, the `<meta name="watchtower-user-*">` tags are in `<head>` AND `applyWatchtowerUser()` is called after `Sentry.init`. See [Smart defaults](#smart-defaults). |
+| Inbox is suddenly missing `ValidationException` / `404` / auth-fail events | BeforeSend smart-default is dropping them — this is the design | If you actually want these in the inbox, edit `watchtower.before_send.ignored_exceptions` and remove the relevant class, or set `WATCHTOWER_BEFORE_SEND=false` to disable the filter entirely. |
+| Request body in event payload shows `[Filtered]` for a non-secret field | The field name matches an entry in `watchtower.before_send.scrub_keys` (case-insensitive) | Edit `watchtower.before_send.scrub_keys` to remove the entry, or rename the field. |
 
 ## Updating this skill
 

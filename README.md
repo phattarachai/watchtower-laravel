@@ -15,6 +15,7 @@ The install command:
 2. Patches `bootstrap/app.php` to call `Sentry\Laravel\Integration::handles($exceptions)` inside `withExceptions(...)`.
 3. Publishes `config/watchtower.php`.
 4. If `vite.config.{js,ts}` is present, writes `VITE_SENTRY_DSN`, `VITE_SENTRY_TUNNEL`, and `VITE_SENTRY_ENVIRONMENT` and prints a Vite entry snippet.
+5. If the `claude` (Claude Code) CLI is on PATH, registers the Watchtower MCP server so Claude can query and triage issues directly. Pass `--no-mcp` to skip.
 
 Re-running is idempotent. Pass `--dry-run` to preview changes.
 
@@ -61,7 +62,7 @@ Prints the resolved config, runs `sentry:test`, and POSTs a synthetic envelope t
 
 ## Troubleshooting
 
-See the upstream Watchtower skill: <https://watchtower.phattarachai.app/skill/watchtower-error-tracking>.
+The bundled skill at `vendor/phattarachai/watchtower-laravel/resources/boost/skills/watchtower-error-tracking/reference.md` covers every install + verify + triage path, including the MCP server. To install it into Claude's skill set: `php artisan boost:install --skills`.
 
 ## License
 
