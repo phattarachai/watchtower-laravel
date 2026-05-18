@@ -46,6 +46,23 @@ initWatchtower();
 
 The Sentry config lives inside the published helper, so multiple entries don't duplicate it. Customize options (e.g. `ignoreErrors`) there once.
 
+In your root Blade layout's `<head>` add the package directive that emits the user-context meta tags:
+
+```blade
+@watchtowerUser
+```
+
+`@watchtowerUser` is registered automatically by the service provider and compiles to three `<meta name="watchtower-user-{id,email,name}">` tags. Customize by publishing the view: `php artisan vendor:publish --tag=watchtower-views`.
+
+For Filament admin panels (which bypass the root Blade layout), register a render hook:
+
+```php
+$panel->renderHook(
+    PanelsRenderHook::HEAD_END,
+    fn (): string => Blade::render('@watchtowerUser'),
+);
+```
+
 Because the request hits your own origin under `/api/`, ad-blockers don't recognize it as Sentry traffic.
 
 ## Async forwarding
