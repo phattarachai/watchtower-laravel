@@ -20,6 +20,7 @@ It will:
 3. Patch `bootstrap/app.php` so `Integration::handles($exceptions)` runs inside `withExceptions(...)`.
 4. Publish `config/watchtower.php`.
 5. If a Vite config exists, set `VITE_SENTRY_DSN`, `VITE_SENTRY_TUNNEL=/api/watchtower-relay`, and `VITE_SENTRY_ENVIRONMENT=${APP_ENV}`.
+6. If `claude` (Claude Code CLI) is on PATH, register the Watchtower HTTP MCP server. Pass `--no-mcp` to skip.
 
 ## Browser init
 
@@ -45,4 +46,6 @@ Then check the issues page on the upstream Watchtower instance.
 
 ## Canonical skill
 
-<https://watchtower.phattarachai.app/skill/watchtower-error-tracking>
+The package ships the canonical Claude skill at `resources/boost/skills/watchtower-error-tracking/`. Laravel Boost auto-discovers it on `php artisan boost:install --skills`.
+
+When editing the skill, keep `SKILL.md` and `reference.md` in sync with `src/Console/InstallCommand.php` (especially the MCP registration behavior).

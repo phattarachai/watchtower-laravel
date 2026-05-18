@@ -6,14 +6,18 @@ namespace Phattarachai\WatchtowerLaravel\Console;
 
 use Illuminate\Console\Command;
 use Phattarachai\WatchtowerLaravel\Support\BootstrapPatcher;
+use Phattarachai\WatchtowerLaravel\Support\ClaudeMcpRegistrar;
 use Phattarachai\WatchtowerLaravel\Support\Dsn;
 use Phattarachai\WatchtowerLaravel\Support\EnvWriter;
 
 class InstallCommand extends Command
 {
-    protected $signature = 'watchtower:install {--dsn= : Watchtower DSN, e.g. http://key@host/42} {--dry-run : Print intended changes without writing files}';
+    protected $signature = 'watchtower:install
+        {--dsn= : Watchtower DSN, e.g. http://key@host/42}
+        {--dry-run : Print intended changes without writing files}
+        {--no-mcp : Skip registering the Watchtower MCP server with Claude Code}';
 
-    protected $description = 'Wire up Watchtower error tracking: DSN, exception handler, frontend tunnel.';
+    protected $description = 'Wire up Watchtower error tracking: DSN, exception handler, frontend tunnel, Claude MCP.';
 
     public function handle(): int
     {
@@ -32,6 +36,7 @@ class InstallCommand extends Command
         }
 
         $this->configureFrontend($dsn, $dryRun);
+        $this->installMcp($dsn, $dryRun);
 
         if ($dryRun) {
             $this->info('--dry-run: no files were modified.');
@@ -40,6 +45,55 @@ class InstallCommand extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    private function installMcp(string $dsn, bool $dryRun): void
+    {
+        if ((bool) $this->option('no-mcp')) {
+            return;
+        }
+
+        $parsed = Dsn::parse($dsn);
+
+        if ($parsed === null) {
+            return;
+        }
+
+        $url           = sprintf('%s://%s/mcp', $parsed['scheme'], $parsed['host_with_port']);
+        $publicKey     = $parsed['public_key'];
+        $manualCommand = sprintf('claude mcp add watchtower %s --header "Authorization: Bearer %s"', $url, $publicKey);
+        $registrar     = app(ClaudeMcpRegistrar::class);
+        $binary        = $registrar->find();
+
+        if ($binary === null) {
+            $this->warn('Claude Code CLI (claude) not detected on PATH.');
+            $this->line('To register the Watchtower MCP server with Claude, run:');
+            $this->line('  '.$manualCommand);
+
+            return;
+        }
+
+        if ($dryRun) {
+            $this->line('Would run: '.$manualCommand);
+
+            return;
+        }
+
+        $result = $registrar->register($binary, 'watchtower', $url, $publicKey, base_path());
+
+        if ($result['success']) {
+            $this->info('Registered Watchtower MCP server with Claude Code (key: watchtower).');
+
+            return;
+        }
+
+        $this->warn('Failed to register Watchtower MCP with Claude Code:');
+
+        if ($result['output'] !== '') {
+            $this->line($result['output']);
+        }
+
+        $this->line('Run manually: '.$manualCommand);
     }
 
     private function resolveDsn(): ?string
