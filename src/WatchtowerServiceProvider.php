@@ -9,12 +9,16 @@ use Illuminate\Support\ServiceProvider;
 use Phattarachai\WatchtowerLaravel\Console\InstallCommand;
 use Phattarachai\WatchtowerLaravel\Console\TestCommand;
 use Phattarachai\WatchtowerLaravel\Http\Middleware\WatchtowerUserContext;
+use Phattarachai\WatchtowerLaravel\Sentry\BeforeSend;
+use Sentry\SentrySdk;
 
 class WatchtowerServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/watchtower.php', 'watchtower');
+
+        $this->app->singleton(BeforeSend::class);
     }
 
     public function boot(): void
@@ -28,6 +32,7 @@ class WatchtowerServiceProvider extends ServiceProvider
         }
 
         $this->registerUserContextMiddleware();
+        $this->registerBeforeSendChain();
 
         if ($this->app->runningInConsole()) {
             $this->commands([
@@ -35,6 +40,40 @@ class WatchtowerServiceProvider extends ServiceProvider
                 TestCommand::class,
             ]);
         }
+    }
+
+    /**
+     * Chain our BeforeSend in front of whatever the user already configured in
+     * config/sentry.php. Runs after the Sentry SDK provider has booted so the
+     * client is built — we then mutate its Options in place.
+     */
+    private function registerBeforeSendChain(): void
+    {
+        if (config('watchtower.before_send.enabled') === false) {
+            return;
+        }
+
+        $this->app->booted(function (): void {
+            $client = SentrySdk::getCurrentHub()->getClient();
+
+            if ($client === null) {
+                return;
+            }
+
+            $options  = $client->getOptions();
+            $existing = $options->getBeforeSendCallback();
+            $ours     = $this->app->make(BeforeSend::class);
+
+            $options->setBeforeSendCallback(function ($event, $hint) use ($ours, $existing) {
+                $event = $ours($event, $hint);
+
+                if ($event === null) {
+                    return null;
+                }
+
+                return $existing ? $existing($event, $hint) : $event;
+            });
+        });
     }
 
     private function registerUserContextMiddleware(): void

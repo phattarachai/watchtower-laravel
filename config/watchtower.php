@@ -36,4 +36,32 @@ return [
         // username natively; other columns land in user.metadata.
         'fields' => [],
     ],
+
+    'before_send' => [
+        'enabled' => filter_var(env('WATCHTOWER_BEFORE_SEND', true), FILTER_VALIDATE_BOOL),
+
+        // Exceptions in this list are dropped at the SDK before egress — they
+        // never reach Watchtower. Extend per project; don't subtract unless
+        // you actually want validation / auth-fail / 404 noise in the inbox.
+        'ignored_exceptions' => [
+            \Illuminate\Validation\ValidationException::class,
+            \Illuminate\Auth\AuthenticationException::class,
+            \Illuminate\Auth\Access\AuthorizationException::class,
+            \Illuminate\Database\Eloquent\ModelNotFoundException::class,
+            \Illuminate\Session\TokenMismatchException::class,
+            \Symfony\Component\HttpKernel\Exception\NotFoundHttpException::class,
+            \Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException::class,
+            \Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException::class,
+            \Symfony\Component\HttpFoundation\Exception\SuspiciousOperationException::class,
+        ],
+
+        // Case-insensitive keys to redact from event.request.data /
+        // event.request.headers / event.extra. Values are replaced with
+        // '[Filtered]'. The credit-card-shape regex is always applied on top.
+        'scrub_keys' => [
+            'password', 'password_confirmation', 'current_password',
+            'token', 'api_key', 'secret', 'authorization', 'cookie',
+            'credit_card', 'card', 'cvv', 'cvc',
+        ],
+    ],
 ];
