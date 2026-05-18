@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Session\TokenMismatchException;
 use Illuminate\Validation\ValidationException;
 use Phattarachai\WatchtowerLaravel\Sentry\BeforeSend;
 use Sentry\Event;
 use Sentry\EventHint;
+use Symfony\Component\HttpFoundation\Exception\SuspiciousOperationException;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 function makeRequestEvent(array $request = [], array $extra = []): Event
@@ -36,7 +41,11 @@ beforeEach(function (): void {
         ValidationException::class,
         AuthenticationException::class,
         AuthorizationException::class,
+        ModelNotFoundException::class,
+        TokenMismatchException::class,
         NotFoundHttpException::class,
+        AccessDeniedHttpException::class,
+        SuspiciousOperationException::class,
     ]]);
     config(['watchtower.before_send.scrub_keys' => [
         'password', 'password_confirmation', 'authorization', 'cookie',
@@ -55,6 +64,31 @@ it('drops 404 exceptions', function (): void {
     $hint  = hintFor(new NotFoundHttpException);
 
     expect((new BeforeSend)($event, $hint))->toBeNull();
+});
+
+it('drops ModelNotFoundException (unwrapped findOrFail from job/console)', function (): void {
+    $exception = (new ModelNotFoundException)->setModel(Model::class, [123]);
+    $event = makeRequestEvent();
+
+    expect((new BeforeSend)($event, hintFor($exception)))->toBeNull();
+});
+
+it('drops TokenMismatchException (CSRF — almost always stale session noise)', function (): void {
+    $event = makeRequestEvent();
+
+    expect((new BeforeSend)($event, hintFor(new TokenMismatchException)))->toBeNull();
+});
+
+it('drops Symfony AccessDeniedHttpException (HTTP-level 403, twin of AuthorizationException)', function (): void {
+    $event = makeRequestEvent();
+
+    expect((new BeforeSend)($event, hintFor(new AccessDeniedHttpException)))->toBeNull();
+});
+
+it('drops SuspiciousOperationException (bot probing for malicious paths/headers)', function (): void {
+    $event = makeRequestEvent();
+
+    expect((new BeforeSend)($event, hintFor(new SuspiciousOperationException)))->toBeNull();
 });
 
 it('passes through exceptions not in the ignored list', function (): void {
