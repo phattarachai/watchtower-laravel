@@ -62,6 +62,40 @@ it('quotes values containing special characters', function (): void {
     expect($contents)->toContain('SECRET="a#b\\$c"');
 });
 
+it('preserves $ when raw is true so dotenv-expand resolves the reference', function (): void {
+    file_put_contents($this->path, '');
+
+    $writer = new EnvWriter($this->path);
+    $writer->set('VITE_SENTRY_ENVIRONMENT', '${APP_ENV}', raw: true);
+
+    $contents = (string) file_get_contents($this->path);
+
+    expect($contents)->toContain('VITE_SENTRY_ENVIRONMENT="${APP_ENV}"')
+        ->and($contents)->not->toContain('\\$');
+});
+
+it('preserves $ on raw updates of existing keys (no escape on replace)', function (): void {
+    file_put_contents($this->path, "VITE_SENTRY_ENVIRONMENT=\"\\\${APP_ENV}\"\n");
+
+    $writer = new EnvWriter($this->path);
+    $writer->set('VITE_SENTRY_ENVIRONMENT', '${APP_ENV}', raw: true);
+
+    $contents = (string) file_get_contents($this->path);
+
+    expect($contents)->toContain('VITE_SENTRY_ENVIRONMENT="${APP_ENV}"')
+        ->and($contents)->not->toContain('\\$');
+});
+
+it('setIfAbsent forwards raw flag', function (): void {
+    file_put_contents($this->path, '');
+
+    $writer = new EnvWriter($this->path);
+    $writer->setIfAbsent('VITE_SENTRY_ENVIRONMENT', '${APP_ENV}', raw: true);
+
+    expect((string) file_get_contents($this->path))
+        ->toContain('VITE_SENTRY_ENVIRONMENT="${APP_ENV}"');
+});
+
 it('reports key presence accurately', function (): void {
     file_put_contents($this->path, "PRESENT=yes\n");
 

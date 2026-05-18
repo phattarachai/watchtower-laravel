@@ -25,10 +25,18 @@ final class EnvWriter
         return (bool) preg_match($pattern, $contents);
     }
 
-    public function set(string $key, string $value): void
+    /**
+     * Write a key/value pair to the .env file.
+     *
+     * When $raw is true, `$` is preserved in the written value so dotenv-expand
+     * references like `${APP_ENV}` survive into Vite's environment. The default
+     * (false) escapes `$` to `\$` to prevent unintended expansion of opaque
+     * secret values that happen to contain a dollar sign.
+     */
+    public function set(string $key, string $value, bool $raw = false): void
     {
         $contents = $this->exists() ? (string) file_get_contents($this->path) : '';
-        $quoted   = $this->quote($value);
+        $quoted   = $this->quote($value, $raw);
         $pattern  = '/^(\s*)'.preg_quote($key, '/').'\s*=.*$/m';
 
         if (preg_match($pattern, $contents)) {
@@ -48,25 +56,29 @@ final class EnvWriter
      * Set the key only if it is not already present. Returns true when a write
      * happened, false when the key was already there (preserving user value).
      */
-    public function setIfAbsent(string $key, string $value): bool
+    public function setIfAbsent(string $key, string $value, bool $raw = false): bool
     {
         if ($this->has($key)) {
             return false;
         }
 
-        $this->set($key, $value);
+        $this->set($key, $value, $raw);
 
         return true;
     }
 
-    private function quote(string $value): string
+    private function quote(string $value, bool $raw = false): string
     {
         if ($value === '') {
             return '';
         }
 
         if (preg_match('/[\s#"\'\\\\$]/', $value)) {
-            return '"'.str_replace(['\\', '"', '$'], ['\\\\', '\"', '\\$'], $value).'"';
+            $replacements = $raw
+                ? ['\\' => '\\\\', '"' => '\"']
+                : ['\\' => '\\\\', '"' => '\"', '$' => '\\$'];
+
+            return '"'.strtr($value, $replacements).'"';
         }
 
         return $value;
