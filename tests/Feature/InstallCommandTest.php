@@ -264,16 +264,14 @@ it('does not write PII or breadcrumb keys in dry-run mode', function (): void {
     expect(file_get_contents($this->envPath))->toBe($envBefore);
 });
 
-it('prints the initWatchtower() snippet and Blade meta tags when Vite is present', function (): void {
+it('prints the initWatchtower() snippet and @watchtowerUser directive when Vite is present', function (): void {
     file_put_contents(base_path('vite.config.js'), "export default {};\n");
 
     $this->artisan('watchtower:install', ['--dsn' => 'http://abc@watchtower.test/42'])
         ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
         ->expectsOutputToContain("import { initWatchtower } from './vendor/watchtower.js';")
         ->expectsOutputToContain('initWatchtower();')
-        ->expectsOutputToContain('<meta name="watchtower-user-id"')
-        ->expectsOutputToContain('<meta name="watchtower-user-email"')
-        ->expectsOutputToContain('<meta name="watchtower-user-name"')
+        ->expectsOutputToContain('@watchtowerUser')
         ->assertExitCode(0);
 
     expect(is_file(resource_path('js/vendor/watchtower.js')))->toBeTrue();
@@ -424,7 +422,7 @@ it('--patch-views injects the meta tags into detected layouts', function (): voi
     $contents = (string) file_get_contents(resource_path('views/components/layouts/app.blade.php'));
 
     expect($contents)->toContain('{{-- watchtower:user-meta --}}')
-        ->and($contents)->toContain('<meta name="watchtower-user-id"');
+        ->and($contents)->toContain('@watchtowerUser');
 
     @unlink(resource_path('views/components/layouts/app.blade.php'));
     @rmdir(resource_path('views/components/layouts'));

@@ -184,11 +184,11 @@ Set any specific key to `false` in `.env` to disable that family without disabli
 The install command publishes `resources/js/vendor/watchtower.js` and prints two snippets to paste:
 
 1. Per-entry init block — imports `initWatchtower` from the published helper and calls it. The helper runs `Sentry.init(...)` with the Watchtower-tuned defaults (same-origin tunnel, `denyUrls` for browser extensions, no PII) and then reads `<meta name="watchtower-user-{id,email,name}">` from the document and calls `Sentry.setUser({id, email, username})` with whatever values are present (no-op when no meta tags are found). The Sentry config lives inside the helper, so adding the snippet to multiple Vite entries does not duplicate the config.
-2. `<meta name="watchtower-user-*">` block — paste into the root Blade layout's `<head>`, rendered from `auth()->id() / ->user()?->email / ->user()?->name`.
+2. `@watchtowerUser` Blade directive — paste into the root Blade layout's `<head>`. The directive compiles to the three meta tags read by the browser helper, sourced from `auth()->id() / ->user()?->email / ->user()?->name`. For Filament admin pages, the install command prints a `PanelsRenderHook::HEAD_END` snippet that returns `Blade::render('@watchtowerUser')` so the same directive emits inside Filament's `<head>`.
 
 The result: browser-side exceptions get the same User tab population as server-side, with the same `id`/`email`/`username` mapping.
 
-The published helper is yours to edit — `--force=false` on re-runs means customizations are preserved. The package version is the source of truth in `vendor/phattarachai/watchtower-laravel/resources/js/watchtower.js`. To customize the Sentry options (e.g. add `ignoreErrors`), edit `Sentry.init({ ... })` inside the published helper, not in every entry.
+The published helper is yours to edit — `--force=false` on re-runs means customizations are preserved. The package version is the source of truth in `vendor/phattarachai/watchtower-laravel/resources/js/watchtower.js`. To customize the Sentry options (e.g. add `ignoreErrors`), edit `Sentry.init({ ... })` inside the published helper, not in every entry. To customize the meta-tag template, publish the view with `php artisan vendor:publish --tag=watchtower-views` and edit `resources/views/vendor/watchtower/user-meta.blade.php` — the `@watchtowerUser` directive will pick up the override automatically.
 
 ### Recommended `.env` per environment
 
@@ -242,12 +242,24 @@ Sentry.init({
 });
 ```
 
-Then in your root Blade layout's `<head>` — `resources/views/components/layouts/app.blade.php` or equivalent — paste:
+Then in your root Blade layout's `<head>` — `resources/views/components/layouts/app.blade.php` or equivalent — add the package directive:
 
 ```blade
-<meta name="watchtower-user-id" content="{{ auth()->id() ?? '' }}">
-<meta name="watchtower-user-email" content="{{ auth()->user()?->email ?? '' }}">
-<meta name="watchtower-user-name" content="{{ auth()->user()?->name ?? '' }}">
+@watchtowerUser
+```
+
+`@watchtowerUser` compiles to the three `<meta name="watchtower-user-{id,email,name}">` tags that the browser helper reads. To customize, publish the source view: `php artisan vendor:publish --tag=watchtower-views` → edit `resources/views/vendor/watchtower/user-meta.blade.php`.
+
+For Filament admin panels (which bypass the root Blade layout), register a render hook in each panel provider:
+
+```php
+use Filament\View\PanelsRenderHook;
+use Illuminate\Support\Facades\Blade;
+
+$panel->renderHook(
+    PanelsRenderHook::HEAD_END,
+    fn (): string => Blade::render('@watchtowerUser'),
+);
 ```
 
 Then install the browser SDK using whichever package manager the consumer already uses — `watchtower:install` detects the lockfile (`bun.lockb`/`bun.lock`, `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`) and prints the matching one-liner, or reports "already in package.json" when the dep is present. If you're running this manually:

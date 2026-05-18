@@ -399,18 +399,14 @@ class InstallCommand extends Command
             $this->output->writeln('  • '.$panel, OutputInterface::OUTPUT_RAW);
         }
 
-        $this->output->writeln('Register a render hook in each panel provider to emit the same meta tags inside Filament <head>:', OutputInterface::OUTPUT_RAW);
+        $this->output->writeln('Register a render hook in each panel provider to emit the @watchtowerUser meta tags inside Filament <head>:', OutputInterface::OUTPUT_RAW);
         $this->writeRawSnippet(<<<'PHP'
             use Filament\View\PanelsRenderHook;
             use Illuminate\Support\Facades\Blade;
 
             $panel->renderHook(
                 PanelsRenderHook::HEAD_END,
-                fn (): string => Blade::render(<<<'BLADE'
-                    <meta name="watchtower-user-id" content="{{ auth()->id() ?? '' }}">
-                    <meta name="watchtower-user-email" content="{{ auth()->user()?->email ?? '' }}">
-                    <meta name="watchtower-user-name" content="{{ auth()->user()?->name ?? '' }}">
-                BLADE),
+                fn (): string => Blade::render('@watchtowerUser'),
             );
             PHP);
     }

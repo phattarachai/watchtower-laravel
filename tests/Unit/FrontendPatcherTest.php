@@ -59,7 +59,7 @@ it('inserts the meta block immediately before </head>', function (): void {
     $contents = (string) file_get_contents($this->bladePath);
 
     expect($contents)->toContain(FrontendPatcher::MARKER_BLADE_OPEN)
-        ->and($contents)->toContain('<meta name="watchtower-user-id"')
+        ->and($contents)->toContain('@watchtowerUser')
         ->and($contents)->toContain(FrontendPatcher::MARKER_BLADE_CLOSE);
 
     $headEnd  = strpos($contents, '</head>');
