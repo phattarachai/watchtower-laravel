@@ -82,7 +82,7 @@ class InstallCommand extends Command
 
         $url           = sprintf('%s://%s/mcp', $parsed['scheme'], $parsed['host_with_port']);
         $publicKey     = $parsed['public_key'];
-        $manualCommand = sprintf('claude mcp add watchtower %s --header "Authorization: Bearer %s"', $url, $publicKey);
+        $manualCommand = sprintf('claude mcp add --transport http watchtower %s --header "Authorization: Bearer %s"', $url, $publicKey);
         $registrar     = app(ClaudeMcpRegistrar::class);
         $binary        = $registrar->find();
 

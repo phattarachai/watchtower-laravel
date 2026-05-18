@@ -30,7 +30,7 @@ class ClaudeMcpRegistrar
     public function register(string $binary, string $name, string $url, string $bearer, string $workingDir): array
     {
         $process = new Process(
-            [$binary, 'mcp', 'add', $name, $url, '--header', sprintf('Authorization: Bearer %s', $bearer)],
+            [$binary, 'mcp', 'add', '--transport', 'http', $name, $url, '--header', sprintf('Authorization: Bearer %s', $bearer)],
             $workingDir
         );
 

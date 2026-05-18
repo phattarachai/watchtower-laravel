@@ -122,7 +122,7 @@ it('prints the manual claude mcp add command when claude is not on PATH', functi
     $this->artisan('watchtower:install', ['--dsn' => 'http://abc@watchtower.test/42'])
         ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
         ->expectsOutputToContain('Claude Code CLI (claude) not detected on PATH.')
-        ->expectsOutputToContain('claude mcp add watchtower http://watchtower.test/mcp --header "Authorization: Bearer abc"')
+        ->expectsOutputToContain('claude mcp add --transport http watchtower http://watchtower.test/mcp --header "Authorization: Bearer abc"')
         ->assertExitCode(0);
 });
 
@@ -192,7 +192,7 @@ it('prints intended MCP command in dry-run mode when claude is available', funct
         '--dry-run' => true,
     ])
         ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
-        ->expectsOutputToContain('Would run: claude mcp add watchtower http://watchtower.test/mcp')
+        ->expectsOutputToContain('Would run: claude mcp add --transport http watchtower http://watchtower.test/mcp')
         ->assertExitCode(0);
 
     expect(app(ClaudeMcpRegistrar::class)->registerCalled)->toBeFalse();
