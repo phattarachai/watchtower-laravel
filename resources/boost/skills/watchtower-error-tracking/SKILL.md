@@ -17,7 +17,7 @@ composer require phattarachai/watchtower-laravel
 php artisan watchtower:install
 ```
 
-The install command prompts for the DSN, writes env keys, patches `bootstrap/app.php` to wire the Sentry exception handler (required for Laravel 11+, easy to forget), publishes the relay route at `/api/watchtower-relay`, and detects Vite to add `VITE_SENTRY_DSN` + `VITE_SENTRY_TUNNEL`. See `reference.md` for the full step list, `--dry-run`, and `--dsn=…` flags.
+The install command prompts for the DSN, writes env keys, patches `bootstrap/app.php` to wire the Sentry exception handler (required for Laravel 11+, easy to forget), publishes the relay route at `/api/watchtower-relay`, and (when a Vite config is present) writes `VITE_SENTRY_DSN` + `VITE_SENTRY_TUNNEL`. See `reference.md` for the full step list, `--dry-run`, and `--dsn=…` flags.
 
 After install, paste the `Sentry.init({ ..., tunnel: import.meta.env.VITE_SENTRY_TUNNEL })` snippet into your JS entry file (snippet in `reference.md` § "Browser-side init"), then `npm install --save @sentry/browser && npm run build`.
 
@@ -34,9 +34,11 @@ https://{public_key}@watchtower.phattarachai.app/my-app  ❌
 
 Stock Sentry SDKs silently reject non-numeric project segments at parse time — the SDK initializes but no events ever leave the client. The settings page renders the numeric form; copy verbatim. See `reference.md` § "DSN format" for the underlying cause.
 
-## One Watchtower project per runtime
+## One Watchtower project per client app
 
-Don't share a project between PHP and JS. Public-key exposure (JS DSNs are visible in the bundle), fingerprinting noise, and alert tuning all push toward one-project-per-runtime. Typical fullstack split: `acme` (php-laravel) + `acme-web` (javascript). Create both in the Watchtower UI at `/projects/create`.
+Default to a single Watchtower project per client app — the same DSN authenticates the Laravel backend (`SENTRY_LARAVEL_DSN`) and the browser frontend (`VITE_SENTRY_DSN`). Backend exceptions and JS errors land in the same inbox; project name in the breadcrumb tells them apart. `watchtower:install` writes both env keys to that DSN automatically.
+
+The trade-off: a frontend DSN is visible in the JS bundle, so a leaked key can be used to forge events. Watchtower's per-project rate limit caps the blast radius; if that's not enough for a given app (regulated environment, public-facing target, very noisy frontend), split into two projects manually — set `VITE_SENTRY_DSN` to a different project's DSN in `.env` after `watchtower:install` runs. Not the default; opt in when you have a reason.
 
 ## Verifying an exception via REST
 

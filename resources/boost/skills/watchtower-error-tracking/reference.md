@@ -14,21 +14,20 @@ Self-hosted, Sentry-compatible exception tracker. Client apps report errors thro
 
 ## Pick the right Watchtower project for this codebase
 
-One Watchtower project per runtime. Don't share a project across PHP + JS:
+Default: **one Watchtower project per client app**. The same DSN authenticates the Laravel backend (`SENTRY_LARAVEL_DSN`) and the browser frontend (`VITE_SENTRY_DSN`). `watchtower:install` writes both env keys to that DSN. Backend exceptions and JS errors share one inbox; project name in the breadcrumb tells them apart at triage time. Create the project once at `https://watchtower.phattarachai.app/projects/create`, pick the primary runtime (usually `php-laravel`) as `platform`, copy the DSN.
 
-| Reason | Why |
+### When to split into two projects
+
+The trade-off of the shared-DSN default is that the frontend DSN ships in the JS bundle, so a leaked key can be used to forge events against the same project. Watchtower's per-project rate limit caps the blast radius. Split into a second project when one of these applies:
+
+| Situation | Why split |
 |---|---|
-| Public-key exposure | A browser DSN is visible in the JS bundle. If the same DSN authenticates server events, a leaked frontend key lets anyone forge backend exceptions. |
-| Fingerprinting noise | PHP stack frames and minified JS frames don't share shape. One project = one inbox where backend and frontend errors collide. |
-| Independent alerting | Frontend errors are noisier (extension noise, third-party scripts). Different cooldowns, different recipients, different rate limits. |
-| Triage at-a-glance | Project name in the inbox answers "backend or frontend?" without opening the event. |
+| Regulated environment | Auditors want server-only and browser-only signals isolated. |
+| Public-facing / high-traffic frontend | A forged-events flood would drown out backend triage. |
+| Very noisy frontend (third-party scripts, extensions) | Different cooldowns, different recipients, different rate limits than backend. |
+| Different alert recipients per runtime | Frontend team owns `javascript`; backend team owns `php-laravel`. |
 
-Typical fullstack split:
-
-- `acme` (platform: `php-laravel`) — Laravel backend, used by `sentry/sentry-laravel`.
-- `acme-web` (platform: `javascript`) — browser JS, used by `@sentry/browser`.
-
-Each has its own DSN. Create them at `https://watchtower.phattarachai.app/projects/create`.
+To split: after `watchtower:install`, edit `.env` to point `VITE_SENTRY_DSN` at a second Watchtower project's DSN. Both projects sit under the same Watchtower **team**, so the MCP server and inbox filters keep working.
 
 ## DSN format — must be numeric
 
@@ -55,11 +54,12 @@ The package is published at <https://packagist.org/packages/phattarachai/watchto
 2. **Writes env keys.** Sets `WATCHTOWER_DSN` and `SENTRY_LARAVEL_DSN` in `.env`. Empty in `.env.example`. For `APP_ENV=local`, prompts whether to use `null` (recommended — don't flood Watchtower from dev).
 3. **Patches `bootstrap/app.php`.** Adds `use Sentry\Laravel\Integration;` and inserts `Integration::handles($exceptions);` inside `withExceptions(...)`. **Critical** — without this, unhandled exceptions in HTTP requests, jobs, and commands never reach Watchtower. If the package can't recognize the file's shape, it prints the diff and bails — apply it by hand.
 4. **Publishes `config/watchtower.php`.** Knobs: relay path, timeout, async forwarding flag, queue name.
-5. **Detects Vite.** If `vite.config.{js,ts}` exists, writes `VITE_SENTRY_DSN`, `VITE_SENTRY_TUNNEL=/api/watchtower-relay`, and `VITE_SENTRY_ENVIRONMENT="${APP_ENV}"` to `.env` and `.env.example`. Prints the `Sentry.init(...)` snippet to paste into the entry JS file (see [Browser-side init](#browser-side-init) below).
+5. **Detects Vite.** If `vite.config.{js,ts}` exists, writes `VITE_SENTRY_DSN` (same value as `SENTRY_LARAVEL_DSN`), `VITE_SENTRY_TUNNEL=/api/watchtower-relay`, and `VITE_SENTRY_ENVIRONMENT="${APP_ENV}"` to `.env` and `.env.example`. Prints the `Sentry.init(...)` snippet to paste into the entry JS file (see [Browser-side init](#browser-side-init) below). To point the browser side at a *different* Watchtower project, edit `VITE_SENTRY_DSN` in `.env` after install — see [When to split into two projects](#when-to-split-into-two-projects).
 
 Flags:
-- `--dsn=…` — skip the prompt.
+- `--dsn=…` — Watchtower DSN. Skips the prompt.
 - `--dry-run` — print intended changes (env diff + `bootstrap/app.php` unified diff) without writing.
+- `--no-mcp` — skip registering the Watchtower HTTP MCP server with Claude Code.
 
 After install: `php artisan watchtower:test` sends a synthetic exception through both the Laravel SDK path and the local relay path.
 
@@ -96,9 +96,11 @@ Opt in to async by setting `WATCHTOWER_RELAY_ASYNC=true` — the relay dispatche
 
 | Environment | `SENTRY_LARAVEL_DSN` | `VITE_SENTRY_DSN` | `WATCHTOWER_RELAY_ASYNC` |
 |---|---|---|---|
-| Production | full DSN | full DSN | `true` (if Horizon present) |
-| Staging | full DSN | full DSN | `true` |
+| Production | full DSN | same DSN | `true` (if Horizon present) |
+| Staging | full DSN | same DSN | `true` |
 | Local dev | `null` | full DSN (for browser dev) or `null` | `false` |
+
+For the rare cases that warrant splitting backend and frontend into two Watchtower projects, set `VITE_SENTRY_DSN` to the second project's DSN — see [When to split into two projects](#when-to-split-into-two-projects).
 
 **Do not set `SENTRY_TRACES_SAMPLE_RATE`.** Watchtower drops trace items.
 
