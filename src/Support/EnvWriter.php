@@ -44,6 +44,21 @@ final class EnvWriter
         file_put_contents($this->path, $contents);
     }
 
+    /**
+     * Set the key only if it is not already present. Returns true when a write
+     * happened, false when the key was already there (preserving user value).
+     */
+    public function setIfAbsent(string $key, string $value): bool
+    {
+        if ($this->has($key)) {
+            return false;
+        }
+
+        $this->set($key, $value);
+
+        return true;
+    }
+
     private function quote(string $value): string
     {
         if ($value === '') {

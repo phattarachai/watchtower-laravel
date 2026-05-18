@@ -9,9 +9,21 @@ use Phattarachai\WatchtowerLaravel\Support\BootstrapPatcher;
 use Phattarachai\WatchtowerLaravel\Support\ClaudeMcpRegistrar;
 use Phattarachai\WatchtowerLaravel\Support\Dsn;
 use Phattarachai\WatchtowerLaravel\Support\EnvWriter;
+use Symfony\Component\Console\Output\OutputInterface;
 
 class InstallCommand extends Command
 {
+    public const string PII_CONFIRM_QUESTION = 'Enable SENTRY_SEND_DEFAULT_PII (attach request data + IP — Watchtower scrubs secrets via BeforeSend)?';
+
+    /** @var array<string, string> Breadcrumb env keys set only when absent. */
+    private const array BREADCRUMB_KEYS = [
+        'SENTRY_BREADCRUMBS_SQL_QUERIES_ENABLED'          => 'true',
+        'SENTRY_BREADCRUMBS_SQL_BINDINGS_ENABLED'         => 'false',
+        'SENTRY_BREADCRUMBS_CACHE_ENABLED'                => 'true',
+        'SENTRY_BREADCRUMBS_HTTP_CLIENT_REQUESTS_ENABLED' => 'true',
+        'SENTRY_BREADCRUMBS_REDIS_COMMANDS_ENABLED'       => 'true',
+    ];
+
     protected $signature = 'watchtower:install
         {--dsn= : Watchtower DSN, e.g. http://key@host/42}
         {--dry-run : Print intended changes without writing files}
@@ -29,6 +41,8 @@ class InstallCommand extends Command
         }
 
         $this->writeEnvKeys($dsn, $dryRun);
+        $this->confirmPii($dryRun);
+        $this->writeBreadcrumbEnvKeys($dryRun);
         $this->patchBootstrap($dryRun);
 
         if (! $dryRun) {
@@ -150,6 +164,50 @@ class InstallCommand extends Command
         $this->info('Wrote DSN keys to .env');
     }
 
+    private function confirmPii(bool $dryRun): void
+    {
+        $isLocal       = (string) env('APP_ENV', 'production') === 'local';
+        $defaultEnable = ! $isLocal;
+        $enable        = (bool) $this->confirm(self::PII_CONFIRM_QUESTION, $defaultEnable);
+        $value         = $enable ? 'true' : 'false';
+
+        if ($dryRun) {
+            $this->line("Would set in .env: SENTRY_SEND_DEFAULT_PII={$value}");
+
+            return;
+        }
+
+        $env = new EnvWriter(base_path('.env'));
+        $env->set('SENTRY_SEND_DEFAULT_PII', $value);
+        $this->info("Wrote SENTRY_SEND_DEFAULT_PII={$value} to .env");
+    }
+
+    private function writeBreadcrumbEnvKeys(bool $dryRun): void
+    {
+        if ($dryRun) {
+            $this->line('Would set in .env (if absent): '.implode(', ', array_keys(self::BREADCRUMB_KEYS)));
+
+            return;
+        }
+
+        $env     = new EnvWriter(base_path('.env'));
+        $written = [];
+
+        foreach (self::BREADCRUMB_KEYS as $key => $value) {
+            if ($env->setIfAbsent($key, $value)) {
+                $written[] = $key;
+            }
+        }
+
+        if ($written === []) {
+            $this->line('Breadcrumb keys already present in .env — left as-is.');
+
+            return;
+        }
+
+        $this->info('Wrote '.count($written).' breadcrumb key(s) to .env: '.implode(', ', $written));
+    }
+
     private function patchBootstrap(bool $dryRun): void
     {
         $path = base_path('bootstrap/app.php');
@@ -199,6 +257,7 @@ class InstallCommand extends Command
 
         if ($dryRun) {
             $this->line('Would set in .env: VITE_SENTRY_DSN, VITE_SENTRY_TUNNEL, VITE_SENTRY_ENVIRONMENT');
+            $this->line('Would publish: resources/js/vendor/watchtower-user-context.js');
 
             return;
         }
@@ -216,18 +275,67 @@ class InstallCommand extends Command
         }
 
         $this->info('Wrote VITE_SENTRY_* keys to .env');
-        $this->line('Add to your Vite entry (e.g. resources/js/app.js):');
-        $this->line(<<<'JS'
+
+        // --force false so re-running install doesn't overwrite user edits to the helper.
+        $this->call('vendor:publish', ['--tag' => 'watchtower-js', '--force' => false]);
+
+        // Snippets contain literal '<' / '>' (Blade tags, JSX-style imports) — emit
+        // as raw so Symfony's OutputFormatter doesn't parse them as styles. Each
+        // line is a separate writeln so testing tools see one assertion per line.
+        $this->output->writeln('Add to your Vite entry (e.g. resources/js/app.js):', OutputInterface::OUTPUT_RAW);
+        $this->writeRawLines(<<<'JS'
 
             import * as Sentry from '@sentry/browser';
+            import { applyWatchtowerUser } from './vendor/watchtower-user-context.js';
 
-            Sentry.init({
-                dsn: import.meta.env.VITE_SENTRY_DSN,
-                tunnel: import.meta.env.VITE_SENTRY_TUNNEL,
-                environment: import.meta.env.VITE_SENTRY_ENVIRONMENT,
-            });
+            if (import.meta.env.VITE_SENTRY_DSN) {
+                Sentry.init({
+                    dsn: import.meta.env.VITE_SENTRY_DSN,
+                    tunnel: import.meta.env.VITE_SENTRY_TUNNEL,
+                    environment: import.meta.env.VITE_SENTRY_ENVIRONMENT,
+                    sendDefaultPii: false,
+                    tracesSampleRate: 0,
+                    denyUrls: [
+                        /^chrome-extension:\/\//i,
+                        /^moz-extension:\/\//i,
+                        /^safari-extension:\/\//i,
+                        /^safari-web-extension:\/\//i,
+                    ],
+                    // Uncomment to suppress common browser noise once you've
+                    // confirmed it isn't masking real issues in your app:
+                    // ignoreErrors: [
+                    //     'ResizeObserver loop limit exceeded',
+                    //     'ResizeObserver loop completed with undelivered notifications',
+                    //     'Script error.',
+                    //     'Non-Error promise rejection captured',
+                    //     'Network request failed',
+                    //     'NetworkError',
+                    //     'Failed to fetch',
+                    //     'Load failed',
+                    //     'top.GLOBALS',
+                    //     'fb_xd_fragment',
+                    // ],
+                });
+                applyWatchtowerUser();
+            }
 
             JS);
+
+        $this->output->writeln('Paste into your root Blade layout <head> so browser exceptions know who is logged in:', OutputInterface::OUTPUT_RAW);
+        $this->writeRawLines(<<<'BLADE'
+
+            <meta name="watchtower-user-id" content="{{ auth()->id() ?? '' }}">
+            <meta name="watchtower-user-email" content="{{ auth()->user()?->email ?? '' }}">
+            <meta name="watchtower-user-name" content="{{ auth()->user()?->name ?? '' }}">
+
+            BLADE);
+    }
+
+    private function writeRawLines(string $block): void
+    {
+        foreach (explode("\n", $block) as $line) {
+            $this->output->writeln($line, OutputInterface::OUTPUT_RAW);
+        }
     }
 
     private function unifiedDiff(string $a, string $b): string

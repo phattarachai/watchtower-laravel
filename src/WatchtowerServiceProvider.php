@@ -27,6 +27,10 @@ class WatchtowerServiceProvider extends ServiceProvider
             __DIR__.'/../config/watchtower.php' => config_path('watchtower.php'),
         ], 'watchtower-config');
 
+        $this->publishes([
+            __DIR__.'/../resources/js/watchtower-user-context.js' => resource_path('js/vendor/watchtower-user-context.js'),
+        ], 'watchtower-js');
+
         if (config('watchtower.relay.enabled', true)) {
             $this->loadRoutesFrom(__DIR__.'/../routes/api.php');
         }

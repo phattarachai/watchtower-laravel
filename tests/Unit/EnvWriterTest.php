@@ -79,3 +79,18 @@ it('creates the file when setting on a non-existent path', function (): void {
 
     expect(file_get_contents($this->path))->toContain("FRESH=value\n");
 });
+
+it('setIfAbsent writes only when the key is missing', function (): void {
+    file_put_contents($this->path, "PRESENT=already-here\n");
+
+    $writer = new EnvWriter($this->path);
+
+    expect($writer->setIfAbsent('PRESENT', 'overwritten'))->toBeFalse()
+        ->and($writer->setIfAbsent('FRESH', 'value'))->toBeTrue();
+
+    $contents = (string) file_get_contents($this->path);
+
+    expect($contents)->toContain('PRESENT=already-here')
+        ->and($contents)->not->toContain('overwritten')
+        ->and($contents)->toContain("FRESH=value\n");
+});
