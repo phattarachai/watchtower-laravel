@@ -141,7 +141,7 @@ class InstallCommand extends Command
 
         $sentryValue = $dsn;
 
-        if ($isLocal && $this->confirm('APP_ENV=local detected. Send local exceptions to Watchtower via SENTRY_LARAVEL_DSN?', false) === false) {
+        if ($isLocal && $this->confirm('APP_ENV=local detected. Send local exceptions to Watchtower via SENTRY_LARAVEL_DSN?', true) === false) {
             $sentryValue = 'null';
         }
 
@@ -166,10 +166,11 @@ class InstallCommand extends Command
 
     private function confirmPii(bool $dryRun): void
     {
-        $isLocal       = (string) env('APP_ENV', 'production') === 'local';
-        $defaultEnable = ! $isLocal;
-        $enable        = (bool) $this->confirm(self::PII_CONFIRM_QUESTION, $defaultEnable);
-        $value         = $enable ? 'true' : 'false';
+        // Opt-in across every env: BeforeSend scrubs known secret keys, but the safer
+        // default for a fresh install is to ship without request body / IP capture
+        // until the operator has confirmed scrub coverage matches their data shape.
+        $enable = (bool) $this->confirm(self::PII_CONFIRM_QUESTION, false);
+        $value  = $enable ? 'true' : 'false';
 
         if ($dryRun) {
             $this->line("Would set in .env: SENTRY_SEND_DEFAULT_PII={$value}");
