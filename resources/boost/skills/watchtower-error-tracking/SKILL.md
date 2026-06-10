@@ -63,13 +63,13 @@ curl -fsSL -H "Authorization: Bearer $PUBLIC_KEY" \
 
 Watchtower exposes an MCP server at `/mcp` so Claude can query and triage issues directly. Each registration is scoped to one Watchtower project — same as the project-scoped REST endpoints. The package's default of one Watchtower project per client app means a single registration covers backend exceptions and browser exceptions in the same inbox.
 
-`watchtower:install` registers it automatically when the `claude` CLI is on PATH. Manual registration:
+`watchtower:install` registers it automatically when the `claude` CLI is on PATH, using `--scope project` so the config lands in a committed `.mcp.json` at the repo root — teammates who `composer install` get the MCP on pull (after approving it once) without re-running the installer. Manual registration:
 
 ```bash
-claude mcp add watchtower https://watchtower.phattarachai.app/mcp \
+claude mcp add --transport http --scope project watchtower https://watchtower.phattarachai.app/mcp \
   --header "Authorization: Bearer <PUBLIC_KEY>"
 ```
 
-`<PUBLIC_KEY>` is the project's DSN public_key — the segment between `https://` and `@` in `SENTRY_LARAVEL_DSN`. If you actually split backend and browser into two Watchtower projects (rare — see `reference.md` § "When to split into two projects"), register one MCP server per project with distinct names (e.g. `watchtower-backend`, `watchtower-frontend`).
+`<PUBLIC_KEY>` is the project's DSN public_key — the segment between `https://` and `@` in `SENTRY_LARAVEL_DSN`. It's already shipped to browsers via `VITE_SENTRY_DSN`, so committing it in `.mcp.json` is safe. If you actually split backend and browser into two Watchtower projects (rare — see `reference.md` § "When to split into two projects"), register one MCP server per project with distinct names (e.g. `watchtower-backend`, `watchtower-frontend`).
 
 Day-to-day tool selection lives in the auto-injected CLAUDE.md guideline (`resources/boost/guidelines/core.md`). Full arg + return reference: `reference.md` § "Querying via MCP".

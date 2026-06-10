@@ -82,7 +82,7 @@ class InstallCommand extends Command
 
         $url           = sprintf('%s://%s/mcp', $parsed['scheme'], $parsed['host_with_port']);
         $publicKey     = $parsed['public_key'];
-        $manualCommand = sprintf('claude mcp add --transport http watchtower %s --header "Authorization: Bearer %s"', $url, $publicKey);
+        $manualCommand = sprintf('claude mcp add --transport http --scope project watchtower %s --header "Authorization: Bearer %s"', $url, $publicKey);
         $registrar     = app(ClaudeMcpRegistrar::class);
         $binary        = $registrar->find();
 
@@ -104,6 +104,7 @@ class InstallCommand extends Command
 
         if ($result['success']) {
             $this->info('Registered Watchtower MCP server with Claude Code (key: watchtower).');
+            $this->line('Wrote project-scoped .mcp.json — commit it so teammates get the MCP on pull.');
 
             return;
         }

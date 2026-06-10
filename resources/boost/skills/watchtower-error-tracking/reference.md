@@ -27,7 +27,7 @@ The trade-off of the shared-DSN default is that the frontend DSN ships in the JS
 | Very noisy frontend (third-party scripts, extensions) | Different cooldowns, different recipients, different rate limits than backend. |
 | Different alert recipients per runtime | Frontend team owns `javascript`; backend team owns `php-laravel`. |
 
-To split: after `watchtower:install`, edit `.env` to point `VITE_SENTRY_DSN` at a second Watchtower project's DSN. Each Watchtower project authenticates its own MCP server — register a second one with `claude mcp add watchtower-frontend <host>/mcp --header "Authorization: Bearer <frontend-public-key>"` so Claude can triage both inboxes.
+To split: after `watchtower:install`, edit `.env` to point `VITE_SENTRY_DSN` at a second Watchtower project's DSN. Each Watchtower project authenticates its own MCP server — register a second one with `claude mcp add --transport http --scope project watchtower-frontend <host>/mcp --header "Authorization: Bearer <frontend-public-key>"` so Claude can triage both inboxes.
 
 ## DSN format — must be numeric
 
@@ -450,10 +450,10 @@ Watchtower exposes a Model Context Protocol server at `/mcp` for Claude Code (an
 
 ### Add the server
 
-`php artisan watchtower:install` registers the MCP server with Claude Code automatically when the `claude` CLI is on PATH (use `--no-mcp` to skip). To register manually after the fact:
+`php artisan watchtower:install` registers the MCP server with Claude Code automatically when the `claude` CLI is on PATH (use `--no-mcp` to skip). It registers with `--scope project`, so the server is written to a committed `.mcp.json` at the repo root rather than the per-machine local config — anyone who pulls the project and runs `composer install` gets the MCP after a one-time approval prompt, without re-running the installer. To register manually after the fact:
 
 ```bash
-claude mcp add watchtower https://watchtower.phattarachai.app/mcp \
+claude mcp add --transport http --scope project watchtower https://watchtower.phattarachai.app/mcp \
   --header "Authorization: Bearer <PUBLIC_KEY>"
 ```
 
@@ -466,8 +466,8 @@ grep -oE '://[a-z0-9]+@' .env | head -1 | tr -d ':/@'
 If you actually split backend and browser into two Watchtower projects (rare — see [When to split into two projects](#when-to-split-into-two-projects)), register one MCP server per project with distinct names so Claude can address each inbox:
 
 ```bash
-claude mcp add watchtower-backend  <host>/mcp --header "Authorization: Bearer <backend-public-key>"
-claude mcp add watchtower-frontend <host>/mcp --header "Authorization: Bearer <frontend-public-key>"
+claude mcp add --transport http --scope project watchtower-backend  <host>/mcp --header "Authorization: Bearer <backend-public-key>"
+claude mcp add --transport http --scope project watchtower-frontend <host>/mcp --header "Authorization: Bearer <frontend-public-key>"
 ```
 
 ### Tool reference
