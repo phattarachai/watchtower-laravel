@@ -1,7 +1,7 @@
 ---
 name: watchtower-error-tracking
 description: Use this skill when the user wants to wire up Watchtower (a self-hosted, Sentry-compatible exception tracker) into a new project, or connect Claude Code to Watchtower's MCP server for in-conversation issue triage. Covers Laravel backends end-to-end via the phattarachai/watchtower-laravel package (one command — DSN, exception handler patch, relay route, MCP registration, plus smart defaults for user-context middleware, BeforeSend noise filtering + secret scrubbing, and breadcrumbs), browser JavaScript via @sentry/browser with the tunnel option, verifying ingestion through Watchtower's REST API, and adding the project-scoped MCP server so Claude can query and triage issues directly. Triggers on mentions of Watchtower, sentry-laravel, @sentry/browser, SENTRY_LARAVEL_DSN, VITE_SENTRY_DSN, WATCHTOWER_DSN, SENTRY_SEND_DEFAULT_PII, WATCHTOWER_USER_CONTEXT, WATCHTOWER_BEFORE_SEND, "set up error tracking", "wire up Watchtower", "verify the exception was reported", "add Watchtower MCP", "claude mcp add watchtower", "triage Watchtower issues from Claude", "user tab empty in Watchtower", "scrub secrets in Sentry events", or "ignore validation exceptions".
-version: 2026.05.18.3
+version: 2026.06.19.1
 ---
 
 # Watchtower error tracking
@@ -9,6 +9,39 @@ version: 2026.05.18.3
 Watchtower is a self-hosted, Sentry-compatible exception tracker. Client apps report errors through the standard Sentry SDKs pointed at a Watchtower instance.
 
 **Scope of this skill:** triage / verify / debug workflows once the package is installed, plus the install entry point. The package ships a short usage guideline that Boost auto-injects into the project's CLAUDE.md (`resources/boost/guidelines/core.md`) covering the day-to-day MCP triage patterns. This file is the deeper reference. For full env-key tables and REST endpoint shapes see [`reference.md`](reference.md).
+
+## Provision the project (headless)
+
+If you don't yet have a DSN, you can create the Watchtower project and mint one without
+leaving the terminal — no clicking through the UI. This needs a **Personal Access Token**
+(PAT) stored once on the dev machine at `~/.watchtower/token`.
+
+```bash
+PAT=$(cat ~/.watchtower/token 2>/dev/null)
+if [ -n "$PAT" ]; then
+  DSN=$(curl -fsS -X POST https://watchtower.phattarachai.app/api/v1/projects \
+    -H "Authorization: Bearer $PAT" -H 'Content-Type: application/json' \
+    -d '{"name":"<App Name>","slug":"<slug>","platform":"php-laravel"}' \
+    | jq -r '.data.dsn')
+  composer require phattarachai/watchtower-laravel
+  php artisan watchtower:install --dsn="$DSN"
+  php artisan watchtower:test
+fi
+```
+
+The endpoint is **idempotent**: re-running with the same slug returns the existing DSN
+(`.data.created` is `false`), so it's safe to retry. Optional `team_slug` targets a specific
+team (default: the PAT user's first team). Resolve / verify a slug or team with
+`GET /api/v1/me` and `GET /api/v1/me/projects`.
+
+**One-time bootstrap** — mint a token at `/me/access-tokens`, then:
+
+```bash
+echo '<token>' > ~/.watchtower/token && chmod 600 ~/.watchtower/token
+```
+
+**No PAT?** Fall back to the manual onboarding flow below — create the project in the
+Watchtower UI, copy its DSN, and run `watchtower:install` (it prompts for the DSN).
 
 ## Install in 3 commands
 
