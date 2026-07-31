@@ -1,7 +1,7 @@
 ---
 name: watchtower-error-tracking
-description: Use this skill when the user wants to wire up Watchtower (a self-hosted, Sentry-compatible exception tracker) into a new project, or connect Claude Code to Watchtower's MCP server for in-conversation issue triage. Covers Laravel backends end-to-end via the phattarachai/watchtower-laravel package (one command — DSN, exception handler patch, relay route, MCP registration, plus smart defaults for user-context middleware, BeforeSend noise filtering + secret scrubbing, and breadcrumbs), browser JavaScript via @sentry/browser with the tunnel option, verifying ingestion through Watchtower's REST API, and adding the project-scoped MCP server so Claude can query and triage issues directly. Triggers on mentions of Watchtower, sentry-laravel, @sentry/browser, SENTRY_LARAVEL_DSN, VITE_SENTRY_DSN, WATCHTOWER_DSN, SENTRY_SEND_DEFAULT_PII, WATCHTOWER_USER_CONTEXT, WATCHTOWER_BEFORE_SEND, "set up error tracking", "wire up Watchtower", "verify the exception was reported", "add Watchtower MCP", "claude mcp add watchtower", "triage Watchtower issues from Claude", "user tab empty in Watchtower", "scrub secrets in Sentry events", or "ignore validation exceptions".
-version: 2026.06.19.1
+description: "Wire up Watchtower (a self-hosted, Sentry-compatible exception tracker) into a Laravel or browser app, and connect Claude Code to its MCP server for in-conversation issue triage. Triggers on \"Watchtower\", \"set up error tracking\", \"verify the exception was reported\", WATCHTOWER_DSN, SENTRY_LARAVEL_DSN, or VITE_SENTRY_DSN."
+version: 2026.07.31.1
 ---
 
 # Watchtower error tracking
