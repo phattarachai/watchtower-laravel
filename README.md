@@ -1,5 +1,12 @@
 # Watchtower Laravel
 
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/phattarachai/watchtower-laravel.svg?style=flat-square)](https://packagist.org/packages/phattarachai/watchtower-laravel)
+[![Tests](https://img.shields.io/github/actions/workflow/status/phattarachai/watchtower-laravel/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/phattarachai/watchtower-laravel/actions/workflows/run-tests.yml?query=branch%3Amain)
+[![Code Style](https://img.shields.io/github/actions/workflow/status/phattarachai/watchtower-laravel/fix-php-code-style-issues.yml?branch=main&label=code%20style&style=flat-square)](https://github.com/phattarachai/watchtower-laravel/actions/workflows/fix-php-code-style-issues.yml?query=branch%3Amain)
+[![PHP Version](https://img.shields.io/packagist/dependency-v/phattarachai/watchtower-laravel/php?style=flat-square&label=php&logo=php&logoColor=white)](https://packagist.org/packages/phattarachai/watchtower-laravel)
+![Laravel Version](https://img.shields.io/badge/laravel-12%20%7C%2013-FF2D20?style=flat-square&logo=laravel&logoColor=white)
+[![Total Downloads](https://img.shields.io/packagist/dt/phattarachai/watchtower-laravel.svg?style=flat-square)](https://packagist.org/packages/phattarachai/watchtower-laravel)
+
 Laravel client for [Watchtower](https://github.com/phattarachai/watchtower), a self-hosted Sentry-compatible exception tracker. Installs and configures `sentry/sentry-laravel`, wires `Integration::handles($exceptions)` into `bootstrap/app.php`, and exposes a same-origin browser tunnel (`/api/watchtower-relay`) that proxies envelopes to your Watchtower instance — dodging ad-blockers that strip `?sentry_key=` query strings.
 
 ## Install
@@ -36,7 +43,7 @@ Re-running is idempotent. Pass `--dry-run` to preview changes.
 
 The browser SDK posts envelopes to your own app at `/api/watchtower-relay`. The relay parses your configured DSN, forwards the request body verbatim to `{scheme}://{host_with_port}/api/watchtower-relay` on the Watchtower instance, and passes back the upstream status and rate-limit headers.
 
-`watchtower:install` publishes a small helper to `resources/js/vendor/watchtower.js` that wraps `Sentry.init(...)` with the Watchtower-tuned defaults (same-origin tunnel, no PII, browser-extension `denyUrls`) and applies `<meta name="watchtower-user-*">` to `Sentry.setUser(...)`. Per Vite entry:
+`watchtower:install` publishes a small helper to `resources/js/vendor/watchtower.js` (plus `resources/js/vendor/livewire.js`, the Livewire `beforeSend` rules it imports) that wraps `Sentry.init(...)` with the Watchtower-tuned defaults (same-origin tunnel, no PII, browser-extension `denyUrls`) and applies `<meta name="watchtower-user-*">` to `Sentry.setUser(...)`. Per Vite entry:
 
 ```js
 import { initWatchtower } from './vendor/watchtower.js';
