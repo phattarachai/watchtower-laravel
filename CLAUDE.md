@@ -36,6 +36,26 @@ Sentry.init({
 });
 ```
 
+## Browser-side Livewire rules
+
+`resources/js/livewire.js` holds the `beforeSend` hook `watchtower.js` imports: it drops Livewire's
+transient noise (419, cancelled `wire:navigate`, torn-down component, all-null response) and restates
+its genuine failures — which Livewire rejects as a raw `{status, body, json, errors}` object rather
+than an `Error` — as `LivewireRequestFailed: … HTTP <status>`, fingerprinted by status. Without that
+restatement every server failure collapses into one `Object captured as exception with keys: …` issue
+whose stack is the minified SDK, so it reads as if Watchtower itself were crashing.
+
+Both files publish under the `watchtower-js` tag. `livewire.js` is deliberately import-free so it can
+be unit-tested without a bundler or npm install.
+
+## Tests
+
+```bash
+composer test       # both suites
+composer test:php   # vendor/bin/pest
+composer test:js    # node --test tests/js/*.test.mjs — no npm dependency, Node's built-in runner
+```
+
 ## Verify
 
 ```bash

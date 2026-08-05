@@ -34,8 +34,8 @@ it('updates an existing key in place', function (): void {
 
     $contents = file_get_contents($this->path);
 
-    expect($contents)->toContain("FOO=new")
-        ->and($contents)->toContain("BAR=keep")
+    expect($contents)->toContain('FOO=new')
+        ->and($contents)->toContain('BAR=keep')
         ->and($contents)->toContain('# top comment')
         ->and(substr_count((string) $contents, 'FOO='))->toBe(1);
 });

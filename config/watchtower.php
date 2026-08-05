@@ -1,20 +1,29 @@
 <?php
 
 declare(strict_types=1);
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Auth\AuthenticationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Session\TokenMismatchException;
+use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\Exception\SuspiciousOperationException;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return [
     'dsn' => env('WATCHTOWER_DSN', env('SENTRY_LARAVEL_DSN')),
 
     'relay' => [
         'enabled' => env('WATCHTOWER_RELAY_ENABLED', true),
-        'path'    => env('WATCHTOWER_RELAY_PATH', '/api/watchtower-relay'),
+        'path' => env('WATCHTOWER_RELAY_PATH', '/api/watchtower-relay'),
         'timeout' => (int) env('WATCHTOWER_RELAY_TIMEOUT', 5),
-        'async'   => filter_var(env('WATCHTOWER_RELAY_ASYNC', false), FILTER_VALIDATE_BOOL),
-        'queue'   => env('WATCHTOWER_RELAY_QUEUE'),
+        'async' => filter_var(env('WATCHTOWER_RELAY_ASYNC', false), FILTER_VALIDATE_BOOL),
+        'queue' => env('WATCHTOWER_RELAY_QUEUE'),
     ],
 
     'forwarder' => [
-        'verify_ssl'      => filter_var(env('WATCHTOWER_VERIFY_SSL', true), FILTER_VALIDATE_BOOL),
+        'verify_ssl' => filter_var(env('WATCHTOWER_VERIFY_SSL', true), FILTER_VALIDATE_BOOL),
         'connect_timeout' => (float) env('WATCHTOWER_CONNECT_TIMEOUT', 3),
     ],
 
@@ -44,15 +53,15 @@ return [
         // never reach Watchtower. Extend per project; don't subtract unless
         // you actually want validation / auth-fail / 404 noise in the inbox.
         'ignored_exceptions' => [
-            \Illuminate\Validation\ValidationException::class,
-            \Illuminate\Auth\AuthenticationException::class,
-            \Illuminate\Auth\Access\AuthorizationException::class,
-            \Illuminate\Database\Eloquent\ModelNotFoundException::class,
-            \Illuminate\Session\TokenMismatchException::class,
-            \Symfony\Component\HttpKernel\Exception\NotFoundHttpException::class,
-            \Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException::class,
-            \Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException::class,
-            \Symfony\Component\HttpFoundation\Exception\SuspiciousOperationException::class,
+            ValidationException::class,
+            AuthenticationException::class,
+            AuthorizationException::class,
+            ModelNotFoundException::class,
+            TokenMismatchException::class,
+            NotFoundHttpException::class,
+            MethodNotAllowedHttpException::class,
+            AccessDeniedHttpException::class,
+            SuspiciousOperationException::class,
         ],
 
         // Case-insensitive keys to redact from event.request.data /

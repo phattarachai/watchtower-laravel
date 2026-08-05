@@ -7,9 +7,9 @@ use Phattarachai\WatchtowerLaravel\Support\ClaudeMcpRegistrar;
 
 beforeEach(function (): void {
     $this->bootstrapPath = base_path('bootstrap/app.php');
-    $this->envPath       = base_path('.env');
+    $this->envPath = base_path('.env');
     $this->originalBootstrap = is_file($this->bootstrapPath) ? file_get_contents($this->bootstrapPath) : null;
-    $this->originalEnv       = is_file($this->envPath) ? file_get_contents($this->envPath) : null;
+    $this->originalEnv = is_file($this->envPath) ? file_get_contents($this->envPath) : null;
 
     if (! is_dir(dirname($this->bootstrapPath))) {
         mkdir(dirname($this->bootstrapPath), 0777, true);
@@ -74,7 +74,7 @@ it('writes env keys and patches bootstrap/app.php', function (): void {
         ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
         ->assertExitCode(0);
 
-    $env       = (string) file_get_contents($this->envPath);
+    $env = (string) file_get_contents($this->envPath);
     $bootstrap = (string) file_get_contents($this->bootstrapPath);
 
     expect($env)->toContain('WATCHTOWER_DSN=http://abc@watchtower.test/42')
@@ -99,11 +99,11 @@ it('is idempotent on a second run', function (): void {
 });
 
 it('does not modify files in dry-run mode', function (): void {
-    $envBefore       = (string) file_get_contents($this->envPath);
+    $envBefore = (string) file_get_contents($this->envPath);
     $bootstrapBefore = (string) file_get_contents($this->bootstrapPath);
 
     $this->artisan('watchtower:install', [
-        '--dsn'     => 'http://abc@watchtower.test/42',
+        '--dsn' => 'http://abc@watchtower.test/42',
         '--dry-run' => true,
     ])
         ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
@@ -128,7 +128,7 @@ it('prints the manual claude mcp add command when claude is not on PATH', functi
 
 it('skips the MCP step entirely when --no-mcp is passed', function (): void {
     $this->artisan('watchtower:install', [
-        '--dsn'    => 'http://abc@watchtower.test/42',
+        '--dsn' => 'http://abc@watchtower.test/42',
         '--no-mcp' => true,
     ])
         ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
@@ -163,8 +163,8 @@ it('registers the MCP with Claude when the binary is available', function (): vo
     $registrar = app(ClaudeMcpRegistrar::class);
     expect($registrar->lastCall)->toMatchArray([
         'binary' => '/usr/local/bin/claude',
-        'name'   => 'watchtower',
-        'url'    => 'http://watchtower.test/mcp',
+        'name' => 'watchtower',
+        'url' => 'http://watchtower.test/mcp',
         'bearer' => 'abc',
     ]);
 });
@@ -188,7 +188,7 @@ it('prints intended MCP command in dry-run mode when claude is available', funct
     });
 
     $this->artisan('watchtower:install', [
-        '--dsn'     => 'http://abc@watchtower.test/42',
+        '--dsn' => 'http://abc@watchtower.test/42',
         '--dry-run' => true,
     ])
         ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
@@ -253,7 +253,7 @@ it('does not write PII or breadcrumb keys in dry-run mode', function (): void {
     $envBefore = (string) file_get_contents($this->envPath);
 
     $this->artisan('watchtower:install', [
-        '--dsn'     => 'http://abc@watchtower.test/42',
+        '--dsn' => 'http://abc@watchtower.test/42',
         '--dry-run' => true,
     ])
         ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
@@ -386,7 +386,7 @@ it('--patch-js injects the Sentry init block into detected entries', function ()
     file_put_contents(resource_path('js/app.js'), "console.log('hi');\n");
 
     $this->artisan('watchtower:install', [
-        '--dsn'      => 'http://abc@watchtower.test/42',
+        '--dsn' => 'http://abc@watchtower.test/42',
         '--patch-js' => true,
     ])
         ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
@@ -412,7 +412,7 @@ it('--patch-views injects the meta tags into detected layouts', function (): voi
     );
 
     $this->artisan('watchtower:install', [
-        '--dsn'         => 'http://abc@watchtower.test/42',
+        '--dsn' => 'http://abc@watchtower.test/42',
         '--patch-views' => true,
     ])
         ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
@@ -440,7 +440,7 @@ it('prints a Filament render-hook block when a panel provider exists', function 
         ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
         ->expectsOutputToContain('Detected Filament panel providers (1)')
         ->expectsOutputToContain('AdminPanelProvider.php')
-        ->expectsOutputToContain("renderHook(")
+        ->expectsOutputToContain('renderHook(')
         ->assertExitCode(0);
 
     @unlink(base_path('app/Providers/Filament/AdminPanelProvider.php'));

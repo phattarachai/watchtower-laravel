@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use Illuminate\Auth\AuthenticationException;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Session\TokenMismatchException;
@@ -24,7 +24,7 @@ function makeRequestEvent(array $request = [], array $extra = []): Event
     return $event;
 }
 
-function hintFor(?\Throwable $exception): EventHint
+function hintFor(?Throwable $exception): EventHint
 {
     $hint = new EventHint;
     $hint->exception = $exception;
@@ -54,14 +54,14 @@ beforeEach(function (): void {
 
 it('drops events whose exception is in the ignored list', function (): void {
     $event = makeRequestEvent();
-    $hint  = hintFor(ValidationException::withMessages(['x' => 'y']));
+    $hint = hintFor(ValidationException::withMessages(['x' => 'y']));
 
     expect((new BeforeSend)($event, $hint))->toBeNull();
 });
 
 it('drops 404 exceptions', function (): void {
     $event = makeRequestEvent();
-    $hint  = hintFor(new NotFoundHttpException);
+    $hint = hintFor(new NotFoundHttpException);
 
     expect((new BeforeSend)($event, $hint))->toBeNull();
 });
@@ -93,7 +93,7 @@ it('drops SuspiciousOperationException (bot probing for malicious paths/headers)
 
 it('passes through exceptions not in the ignored list', function (): void {
     $event = makeRequestEvent(['data' => ['name' => 'alice']]);
-    $hint  = hintFor(new RuntimeException('boom'));
+    $hint = hintFor(new RuntimeException('boom'));
 
     $result = (new BeforeSend)($event, $hint);
 
@@ -104,8 +104,8 @@ it('passes through exceptions not in the ignored list', function (): void {
 it('redacts scrub_keys from request data (case-insensitive)', function (): void {
     $event = makeRequestEvent([
         'data' => [
-            'name'                  => 'alice',
-            'password'              => 'plaintext',
+            'name' => 'alice',
+            'password' => 'plaintext',
             'Password_Confirmation' => 'plaintext',
         ],
     ]);
@@ -121,9 +121,9 @@ it('redacts scrub_keys from request data (case-insensitive)', function (): void 
 it('redacts scrub_keys from request headers', function (): void {
     $event = makeRequestEvent([
         'headers' => [
-            'User-Agent'    => 'Mozilla',
+            'User-Agent' => 'Mozilla',
             'Authorization' => 'Bearer secret-token',
-            'Cookie'        => 'session=abc',
+            'Cookie' => 'session=abc',
         ],
     ]);
 
@@ -152,7 +152,7 @@ it('walks nested arrays when scrubbing', function (): void {
     $event = makeRequestEvent([
         'data' => [
             'user' => [
-                'email'    => 'a@b.com',
+                'email' => 'a@b.com',
                 'password' => 'plaintext',
             ],
         ],
@@ -168,7 +168,7 @@ it('walks nested arrays when scrubbing', function (): void {
 it('scrubs extra data alongside the request', function (): void {
     $event = makeRequestEvent(extra: [
         'context' => 'job',
-        'token'   => 'should-be-scrubbed',
+        'token' => 'should-be-scrubbed',
     ]);
     config(['watchtower.before_send.scrub_keys' => ['token']]);
 
@@ -182,7 +182,7 @@ it('scrubs extra data alongside the request', function (): void {
 it('is a no-op when disabled', function (): void {
     config(['watchtower.before_send.enabled' => false]);
     $event = makeRequestEvent(['data' => ['password' => 'plaintext']]);
-    $hint  = hintFor(new ValidationException(validator(['x' => null], ['x' => 'required'])));
+    $hint = hintFor(new ValidationException(validator(['x' => null], ['x' => 'required'])));
 
     $result = (new BeforeSend)($event, $hint);
 

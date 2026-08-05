@@ -104,7 +104,7 @@ class EloquentLikeUser implements Authenticatable
 {
     /**
      * @param  array<string, mixed>  $attributes
-     * @param  array<int, string>    $hidden
+     * @param  array<int, string>  $hidden
      */
     public function __construct(
         private array $attributes = [],
@@ -167,7 +167,7 @@ beforeEach(function (): void {
     Auth::extend('fake', fn () => new FakeGuard);
 
     config(['auth.guards' => [
-        'web'   => ['driver' => 'fake'],
+        'web' => ['driver' => 'fake'],
         'admin' => ['driver' => 'fake'],
     ]]);
 
@@ -190,9 +190,9 @@ beforeEach(function (): void {
         \Sentry\configureScope(function (Scope $scope) use (&$captured): void {
             $user = $scope->getUser();
             $captured = $user === null ? null : [
-                'id'         => $user->getId(),
-                'email'      => $user->getEmail(),
-                'username'   => $user->getUsername(),
+                'id' => $user->getId(),
+                'email' => $user->getEmail(),
+                'username' => $user->getUsername(),
                 'ip_address' => $user->getIpAddress(),
             ];
         });
@@ -218,7 +218,7 @@ it('attaches the authed user to the Sentry scope', function (): void {
     ($this->run)();
 
     expect(($this->capturedUser)())->toMatchArray([
-        'id'    => '42',
+        'id' => '42',
         'email' => 'a@b.com',
     ]);
 });
@@ -237,7 +237,7 @@ it('walks guards in configured order; first authed wins', function (): void {
     ($this->run)();
 
     expect(($this->capturedUser)())->toMatchArray([
-        'id'    => '99',
+        'id' => '99',
         'email' => 'admin@x.com',
     ]);
     expect(($this->capturedTag)('auth.guard'))->toBe('admin');
@@ -270,7 +270,7 @@ it('attaches ip_address from the request when configured', function (): void {
     ($this->run)($request);
 
     expect(($this->capturedUser)())->toMatchArray([
-        'id'         => '1',
+        'id' => '1',
         'ip_address' => '203.0.113.7',
     ]);
 });
@@ -288,19 +288,19 @@ it('auto-discovers all model attributes when fields is empty, excluding $hidden 
     config(['watchtower.user_context.fields' => []]);
 
     $user = new EloquentLikeUser([
-        'id'                        => 12,
-        'email'                     => 'a@b.com',
-        'name'                      => 'Alice',
-        'google_id'                 => 'g-1',
-        'is_super_admin'            => true,
-        'created_at'                => '2026-01-01 00:00:00',
-        'password'                  => 'should-never-leak',
-        'remember_token'            => 'should-never-leak',
-        'two_factor_secret'         => 'should-never-leak',
+        'id' => 12,
+        'email' => 'a@b.com',
+        'name' => 'Alice',
+        'google_id' => 'g-1',
+        'is_super_admin' => true,
+        'created_at' => '2026-01-01 00:00:00',
+        'password' => 'should-never-leak',
+        'remember_token' => 'should-never-leak',
+        'two_factor_secret' => 'should-never-leak',
         'two_factor_recovery_codes' => 'should-never-leak',
-        'api_token'                 => 'should-never-leak',
-        'password_hash'             => 'should-never-leak',
-        'phone'                     => '555-0100',     // app-defined; sits in $hidden below
+        'api_token' => 'should-never-leak',
+        'password_hash' => 'should-never-leak',
+        'phone' => '555-0100',     // app-defined; sits in $hidden below
     ], hidden: ['password', 'remember_token', 'phone']);
 
     ($this->loginAs)('web', $user);
@@ -328,6 +328,6 @@ it('swallows auth driver exceptions so the request still completes', function ()
     // Point at a guard that does not exist; auth()->guard('missing') throws.
     config(['watchtower.user_context.guards' => 'missing']);
 
-    expect(fn () => ($this->run)())->not->toThrow(\Throwable::class);
+    expect(fn () => ($this->run)())->not->toThrow(Throwable::class);
     expect(($this->capturedUser)())->toBeNull();
 });

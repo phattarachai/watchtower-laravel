@@ -1,40 +1,7 @@
 import * as Sentry from '@sentry/browser';
+import { beforeSend } from './livewire.js';
 
 let initialized = false;
-
-/**
- * Sentry beforeSend hook that drops the transient, non-actionable promise
- * rejections Livewire/Filament emit during normal SPA navigation and session
- * lifecycle. These arrive frame-less via the global onunhandledrejection
- * handler and are pure noise — never a real application bug:
- *
- *   - 419 "Page Expired": an idle session / stale CSRF token makes Livewire
- *     reject its request promise with the raw response object ({status: 419}).
- *   - wire:navigate transition aborted because the user clicked through before
- *     it settled ({isFromCancelledTransition: true}).
- *   - a component torn down mid-navigation resolves to an undefined name
- *     ("Component not found: undefined") — a race, never a registration error
- *     (a genuinely missing component is named in the message).
- *
- * @param {import('@sentry/browser').ErrorEvent} event
- * @param {import('@sentry/browser').EventHint} hint
- * @returns {import('@sentry/browser').ErrorEvent | null}
- */
-function dropLivewireTransientNoise(event, hint) {
-    const reason = hint?.originalException;
-
-    if (reason && typeof reason === 'object') {
-        if (reason.status === 419 || reason.isFromCancelledTransition === true) {
-            return null;
-        }
-    }
-
-    if (typeof reason === 'string' && reason.includes('Component not found: undefined')) {
-        return null;
-    }
-
-    return event;
-}
 
 /**
  * Initialize the Watchtower browser SDK and apply the logged-in user.
@@ -61,7 +28,7 @@ export function initWatchtower() {
             environment: import.meta.env.VITE_SENTRY_ENVIRONMENT,
             sendDefaultPii: false,
             tracesSampleRate: 0,
-            beforeSend: dropLivewireTransientNoise,
+            beforeSend,
             denyUrls: [
                 /^chrome-extension:\/\//i,
                 /^moz-extension:\/\//i,

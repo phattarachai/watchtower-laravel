@@ -30,6 +30,7 @@ class WatchtowerServiceProvider extends ServiceProvider
 
         $this->publishes([
             __DIR__.'/../resources/js/watchtower.js' => resource_path('js/vendor/watchtower.js'),
+            __DIR__.'/../resources/js/livewire.js' => resource_path('js/vendor/livewire.js'),
         ], 'watchtower-js');
 
         $this->loadViewsFrom(__DIR__.'/../resources/views', 'watchtower');
@@ -73,9 +74,9 @@ class WatchtowerServiceProvider extends ServiceProvider
                 return;
             }
 
-            $options  = $client->getOptions();
+            $options = $client->getOptions();
             $existing = $options->getBeforeSendCallback();
-            $ours     = $this->app->make(BeforeSend::class);
+            $ours = $this->app->make(BeforeSend::class);
 
             $options->setBeforeSendCallback(function ($event, $hint) use ($ours, $existing) {
                 $event = $ours($event, $hint);
