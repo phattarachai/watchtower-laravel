@@ -1,14 +1,24 @@
 ---
 name: watchtower-error-tracking
 description: "Wire up Watchtower (a self-hosted, Sentry-compatible exception tracker) into a Laravel or browser app, and connect Claude Code to its MCP server for in-conversation issue triage. Triggers on \"Watchtower\", \"set up error tracking\", \"verify the exception was reported\", WATCHTOWER_DSN, SENTRY_LARAVEL_DSN, or VITE_SENTRY_DSN."
-version: 2026.07.31.1
+version: 2026.08.05.1
 ---
 
 # Watchtower error tracking
 
 Watchtower is a self-hosted, Sentry-compatible exception tracker. Client apps report errors through the standard Sentry SDKs pointed at a Watchtower instance.
 
-**Scope of this skill:** triage / verify / debug workflows once the package is installed, plus the install entry point. The package ships a short usage guideline that Boost auto-injects into the project's CLAUDE.md (`resources/boost/guidelines/core.md`) covering the day-to-day MCP triage patterns. This file is the deeper reference. For full env-key tables and REST endpoint shapes see [`reference.md`](reference.md).
+**Scope of this skill:** everything past the one-paragraph blurb Boost auto-injects into the project's CLAUDE.md (`resources/boost/guidelines/core.md`) — what the package wires up, install, triage, verification, troubleshooting. For full env-key tables and REST endpoint shapes see [`reference.md`](reference.md).
+
+## What the package wires up
+
+- **Backend reporting** — `sentry/sentry-laravel` pointed at the Watchtower instance via `SENTRY_LARAVEL_DSN`, with `Integration::handles($exceptions)` wired into `bootstrap/app.php`.
+- **Browser reporting** — `@sentry/browser` pointed at `VITE_SENTRY_DSN` and tunnelled through the same-origin `/api/watchtower-relay` route, so ad blockers don't drop envelopes.
+- **User context** — the `WatchtowerUserContext` middleware plus the `@watchtowerUser` Blade directive, so events arrive with the signed-in user attached.
+- **Noise filtering + scrubbing** — a `before_send` pipeline that drops framework exceptions (validation, auth, 404, CSRF, …) and strips secrets from request data, headers, cookies, and extra.
+- **MCP server** — a project-scoped `watchtower` entry in `.mcp.json` exposing `mcp__watchtower__*` tools for issue triage from inside Claude Code.
+
+Config lives in `config/watchtower.php`; every default above is opt-out via env (see [Smart defaults](#smart-defaults-laravel-package)). `php artisan watchtower:test` verifies backend, relay, and frontend wiring end to end.
 
 ## Provision the project (headless)
 
@@ -105,4 +115,12 @@ claude mcp add --transport http --scope project watchtower https://watchtower.ph
 
 `<PUBLIC_KEY>` is the project's DSN public_key — the segment between `https://` and `@` in `SENTRY_LARAVEL_DSN`. It's already shipped to browsers via `VITE_SENTRY_DSN`, so committing it in `.mcp.json` is safe. If you actually split backend and browser into two Watchtower projects (rare — see `reference.md` § "When to split into two projects"), register one MCP server per project with distinct names (e.g. `watchtower-backend`, `watchtower-frontend`).
 
-Day-to-day tool selection lives in the auto-injected CLAUDE.md guideline (`resources/boost/guidelines/core.md`). Full arg + return reference: `reference.md` § "Querying via MCP".
+## MCP triage (when `mcp__watchtower__*` tools are connected)
+
+- `mcp__watchtower__list_issues` / `mcp__watchtower__list_events` — browse, filter by environment / level / release / `since`.
+- `mcp__watchtower__get_issue` — drill into one issue group. Use right after `list_issues` and grab `latest_event_id` from the response for the common "fix the latest occurrence" flow.
+- `mcp__watchtower__get_event` — fetch a full event payload (stacktrace, breadcrumbs, request, contexts). The debugging entry point: feed the `event_id` from `get_issue.latest_event_id` (or from a verification capture) and read the stack to locate the bug.
+- `mcp__watchtower__resolve_issue` / `ignore_issue` / `unresolve_issue` / `snooze_issue` — triage actions. Use after the user has confirmed a fix or noise classification, not unilaterally.
+- `mcp__watchtower__get_stats` — volumes, top issues, status mix; useful for "what's noisy right now?" questions.
+
+Full arg + return reference, plus the end-to-end verify and debug flows: `reference.md` § "Querying via MCP".
