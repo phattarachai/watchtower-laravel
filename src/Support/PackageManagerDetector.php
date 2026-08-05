@@ -33,9 +33,9 @@ final class PackageManagerDetector
 
         return match (true) {
             is_file($this->path('bun.lockb')), is_file($this->path('bun.lock')) => 'bun',
-            is_file($this->path('pnpm-lock.yaml'))                              => 'pnpm',
-            is_file($this->path('yarn.lock'))                                   => 'yarn',
-            default                                                             => 'npm',
+            is_file($this->path('pnpm-lock.yaml')) => 'pnpm',
+            is_file($this->path('yarn.lock')) => 'yarn',
+            default => 'npm',
         };
     }
 
@@ -49,9 +49,9 @@ final class PackageManagerDetector
         $manager = $this->detect() ?? 'npm';
 
         return match ($manager) {
-            'bun'   => 'bun add '.$package,
-            'pnpm'  => 'pnpm add '.$package,
-            'yarn'  => 'yarn add '.$package,
+            'bun' => 'bun add '.$package,
+            'pnpm' => 'pnpm add '.$package,
+            'yarn' => 'yarn add '.$package,
             default => 'npm install --save '.$package,
         };
     }

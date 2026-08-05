@@ -20,10 +20,10 @@ class TestCommand extends Command
 
     public function handle(): int
     {
-        $dsn       = (string) (config('watchtower.dsn') ?? '');
+        $dsn = (string) (config('watchtower.dsn') ?? '');
         $relayPath = (string) config('watchtower.relay.path', '/api/watchtower-relay');
-        $async     = (bool) config('watchtower.relay.async', false);
-        $parsed    = Dsn::parse($dsn, $relayPath);
+        $async = (bool) config('watchtower.relay.async', false);
+        $parsed = Dsn::parse($dsn, $relayPath);
 
         if ($parsed === null) {
             $this->error('WATCHTOWER_DSN is missing or invalid.');
@@ -36,8 +36,8 @@ class TestCommand extends Command
         $this->line('Relay path: '.$relayPath);
         $this->line('Async:      '.($async ? 'true' : 'false'));
 
-        $sentryOk   = $this->runSentryProbe();
-        $relayOk    = $this->runRelayProbe($dsn, $relayPath);
+        $sentryOk = $this->runSentryProbe();
+        $relayOk = $this->runRelayProbe($dsn, $relayPath);
         $frontendOk = $this->verifyFrontendWiring();
 
         return $sentryOk && $relayOk && $frontendOk ? self::SUCCESS : self::FAILURE;
@@ -60,11 +60,11 @@ class TestCommand extends Command
         $this->line('');
         $this->line('Verifying frontend wiring...');
 
-        $entries        = $vite->jsEntries();
-        $layouts        = (new LayoutDetector(base_path()))->layouts();
+        $entries = $vite->jsEntries();
+        $layouts = (new LayoutDetector(base_path()))->layouts();
         $missingEntries = $this->entriesMissingMarker($entries, FrontendPatcher::MARKER_JS_OPEN);
         $missingLayouts = $this->entriesMissingMarker($layouts, FrontendPatcher::MARKER_BLADE_OPEN);
-        $envBugLine     = $this->literalAppEnvLine();
+        $envBugLine = $this->literalAppEnvLine();
 
         $problems = [];
 
@@ -168,28 +168,28 @@ class TestCommand extends Command
         $this->line('');
         $this->line('Posting synthetic envelope to relay...');
 
-        $eventId   = (string) Str::replace('-', '', (string) Str::uuid());
-        $sentAt    = gmdate('Y-m-d\TH:i:s\Z');
+        $eventId = (string) Str::replace('-', '', (string) Str::uuid());
+        $sentAt = gmdate('Y-m-d\TH:i:s\Z');
         $timestamp = time();
 
         $envelopeHeader = json_encode([
             'event_id' => $eventId,
-            'sent_at'  => $sentAt,
-            'dsn'      => $dsn,
-            'sdk'      => ['name' => 'watchtower.cli', 'version' => '0.1.0'],
+            'sent_at' => $sentAt,
+            'dsn' => $dsn,
+            'sdk' => ['name' => 'watchtower.cli', 'version' => '0.1.0'],
         ], JSON_THROW_ON_ERROR);
 
         $event = json_encode([
-            'event_id'  => $eventId,
-            'message'   => 'watchtower:test relay probe',
-            'platform'  => 'php',
-            'level'     => 'info',
+            'event_id' => $eventId,
+            'message' => 'watchtower:test relay probe',
+            'platform' => 'php',
+            'level' => 'info',
             'timestamp' => $timestamp,
         ], JSON_THROW_ON_ERROR);
 
         $itemHeader = json_encode([
-            'type'         => 'event',
-            'length'       => strlen($event),
+            'type' => 'event',
+            'length' => strlen($event),
             'content_type' => 'application/json',
         ], JSON_THROW_ON_ERROR);
 

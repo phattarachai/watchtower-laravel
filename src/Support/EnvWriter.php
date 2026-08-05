@@ -20,7 +20,7 @@ final class EnvWriter
         }
 
         $contents = (string) file_get_contents($this->path);
-        $pattern  = '/^(\s*)'.preg_quote($key, '/').'\s*=.*$/m';
+        $pattern = '/^(\s*)'.preg_quote($key, '/').'\s*=.*$/m';
 
         return (bool) preg_match($pattern, $contents);
     }
@@ -36,8 +36,8 @@ final class EnvWriter
     public function set(string $key, string $value, bool $raw = false): void
     {
         $contents = $this->exists() ? (string) file_get_contents($this->path) : '';
-        $quoted   = $this->quote($value, $raw);
-        $pattern  = '/^(\s*)'.preg_quote($key, '/').'\s*=.*$/m';
+        $quoted = $this->quote($value, $raw);
+        $pattern = '/^(\s*)'.preg_quote($key, '/').'\s*=.*$/m';
 
         if (preg_match($pattern, $contents)) {
             $contents = preg_replace($pattern, '${1}'.$key.'='.$this->escapeReplacement($quoted), $contents) ?? $contents;

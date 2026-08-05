@@ -22,11 +22,11 @@ class InstallCommand extends Command
 
     /** @var array<string, string> Breadcrumb env keys set only when absent. */
     private const array BREADCRUMB_KEYS = [
-        'SENTRY_BREADCRUMBS_SQL_QUERIES_ENABLED'          => 'true',
-        'SENTRY_BREADCRUMBS_SQL_BINDINGS_ENABLED'         => 'false',
-        'SENTRY_BREADCRUMBS_CACHE_ENABLED'                => 'true',
+        'SENTRY_BREADCRUMBS_SQL_QUERIES_ENABLED' => 'true',
+        'SENTRY_BREADCRUMBS_SQL_BINDINGS_ENABLED' => 'false',
+        'SENTRY_BREADCRUMBS_CACHE_ENABLED' => 'true',
         'SENTRY_BREADCRUMBS_HTTP_CLIENT_REQUESTS_ENABLED' => 'true',
-        'SENTRY_BREADCRUMBS_REDIS_COMMANDS_ENABLED'       => 'true',
+        'SENTRY_BREADCRUMBS_REDIS_COMMANDS_ENABLED' => 'true',
     ];
 
     protected $signature = 'watchtower:install
@@ -41,7 +41,7 @@ class InstallCommand extends Command
     public function handle(): int
     {
         $dryRun = (bool) $this->option('dry-run');
-        $dsn    = $this->resolveDsn();
+        $dsn = $this->resolveDsn();
 
         if ($dsn === null) {
             return self::FAILURE;
@@ -80,11 +80,11 @@ class InstallCommand extends Command
             return;
         }
 
-        $url           = sprintf('%s://%s/mcp', $parsed['scheme'], $parsed['host_with_port']);
-        $publicKey     = $parsed['public_key'];
+        $url = sprintf('%s://%s/mcp', $parsed['scheme'], $parsed['host_with_port']);
+        $publicKey = $parsed['public_key'];
         $manualCommand = sprintf('claude mcp add --transport http --scope project watchtower %s --header "Authorization: Bearer %s"', $url, $publicKey);
-        $registrar     = app(ClaudeMcpRegistrar::class);
-        $binary        = $registrar->find();
+        $registrar = app(ClaudeMcpRegistrar::class);
+        $binary = $registrar->find();
 
         if ($binary === null) {
             $this->warn('Claude Code CLI (claude) not detected on PATH.');
@@ -143,9 +143,9 @@ class InstallCommand extends Command
 
     private function writeEnvKeys(string $dsn, bool $dryRun): void
     {
-        $envPath        = base_path('.env');
+        $envPath = base_path('.env');
         $envExamplePath = base_path('.env.example');
-        $isLocal        = (string) env('APP_ENV', 'production') === 'local';
+        $isLocal = (string) env('APP_ENV', 'production') === 'local';
 
         $sentryValue = $dsn;
 
@@ -178,7 +178,7 @@ class InstallCommand extends Command
         // default for a fresh install is to ship without request body / IP capture
         // until the operator has confirmed scrub coverage matches their data shape.
         $enable = (bool) $this->confirm(self::PII_CONFIRM_QUESTION, false);
-        $value  = $enable ? 'true' : 'false';
+        $value = $enable ? 'true' : 'false';
 
         if ($dryRun) {
             $this->line("Would set in .env: SENTRY_SEND_DEFAULT_PII={$value}");
@@ -199,7 +199,7 @@ class InstallCommand extends Command
             return;
         }
 
-        $env     = new EnvWriter(base_path('.env'));
+        $env = new EnvWriter(base_path('.env'));
         $written = [];
 
         foreach (self::BREADCRUMB_KEYS as $key => $value) {
@@ -227,7 +227,7 @@ class InstallCommand extends Command
             return;
         }
 
-        $patcher  = BootstrapPatcher::fromFile($path);
+        $patcher = BootstrapPatcher::fromFile($path);
         $original = (string) file_get_contents($path);
 
         if ($patcher->alreadyWired()) {
@@ -298,10 +298,10 @@ class InstallCommand extends Command
 
     private function emitFrontendPlacement(ViteEntryDetector $viteDetector): void
     {
-        $jsEntries  = $viteDetector->jsEntries();
-        $layouts    = (new LayoutDetector(base_path()))->layouts();
-        $panels     = (new FilamentPanelDetector(base_path()))->panels();
-        $patchJs    = (bool) $this->option('patch-js');
+        $jsEntries = $viteDetector->jsEntries();
+        $layouts = (new LayoutDetector(base_path()))->layouts();
+        $panels = (new FilamentPanelDetector(base_path()))->panels();
+        $patchJs = (bool) $this->option('patch-js');
         $patchViews = (bool) $this->option('patch-views');
 
         $this->emitJsBlock($jsEntries, $patchJs);
@@ -328,7 +328,7 @@ class InstallCommand extends Command
 
         foreach ($entries as $entry) {
             $absolute = base_path($entry);
-            $status   = $patch ? $this->patchJsAndReport($absolute) : $this->describeJsState($absolute);
+            $status = $patch ? $this->patchJsAndReport($absolute) : $this->describeJsState($absolute);
 
             $this->output->writeln('  • '.$entry.$status, OutputInterface::OUTPUT_RAW);
         }
@@ -373,7 +373,7 @@ class InstallCommand extends Command
 
         foreach ($layouts as $layout) {
             $absolute = base_path($layout);
-            $status   = $patch ? $this->patchBladeAndReport($absolute) : $this->describeBladeState($absolute);
+            $status = $patch ? $this->patchBladeAndReport($absolute) : $this->describeBladeState($absolute);
 
             $this->output->writeln('  • '.$layout.$status, OutputInterface::OUTPUT_RAW);
         }

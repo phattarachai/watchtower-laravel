@@ -13,7 +13,7 @@ it('runs to completion against a faked HTTP client', function (): void {
         '*/api/watchtower-relay' => Http::response('{"id":"evt"}', 200),
     ]);
 
-    $mock  = new MockHandler([new GuzzleResponse(200, [], '{"id":"evt"}')]);
+    $mock = new MockHandler([new GuzzleResponse(200, [], '{"id":"evt"}')]);
     $stack = HandlerStack::create($mock);
     app()->instance(Client::class, new Client(['handler' => $stack]));
 

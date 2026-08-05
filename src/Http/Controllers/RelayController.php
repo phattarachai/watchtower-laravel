@@ -28,18 +28,18 @@ class RelayController
     public function __invoke(Request $request): Response|JsonResponse
     {
         $relayPath = (string) config('watchtower.relay.path', '/api/watchtower-relay');
-        $parsed    = Dsn::parse(config('watchtower.dsn'), $relayPath);
+        $parsed = Dsn::parse(config('watchtower.dsn'), $relayPath);
 
         if ($parsed === null) {
             return new JsonResponse(['error' => 'watchtower_dsn_missing'], 503);
         }
 
         $upstream = $parsed['scheme'].'://'.$parsed['host_with_port'].$relayPath;
-        $body     = $request->getContent();
-        $headers  = $this->forwardedHeaders($request);
+        $body = $request->getContent();
+        $headers = $this->forwardedHeaders($request);
 
         if ((bool) config('watchtower.relay.async', false)) {
-            $job   = new ForwardEnvelope($upstream, $body, $headers);
+            $job = new ForwardEnvelope($upstream, $body, $headers);
             $queue = config('watchtower.relay.queue');
 
             if ($queue !== null && $queue !== '') {
@@ -63,16 +63,16 @@ class RelayController
 
         try {
             $response = $client->post($upstream, [
-                'headers'         => $headers,
-                'body'            => $body,
-                'http_errors'     => false,
-                'timeout'         => (int) config('watchtower.relay.timeout', 5),
+                'headers' => $headers,
+                'body' => $body,
+                'http_errors' => false,
+                'timeout' => (int) config('watchtower.relay.timeout', 5),
                 'connect_timeout' => (float) config('watchtower.forwarder.connect_timeout', 3),
-                'verify'          => (bool) config('watchtower.forwarder.verify_ssl', true),
+                'verify' => (bool) config('watchtower.forwarder.verify_ssl', true),
             ]);
         } catch (GuzzleException $e) {
             return new JsonResponse([
-                'error'   => 'upstream_unreachable',
+                'error' => 'upstream_unreachable',
                 'message' => $e->getMessage(),
             ], 502);
         }

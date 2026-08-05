@@ -37,23 +37,23 @@ class ForwardEnvelope implements ShouldQueue
     {
         $client ??= app(Client::class);
 
-        $timeout       = (int) config('watchtower.relay.timeout', 5);
-        $verifySsl     = (bool) config('watchtower.forwarder.verify_ssl', true);
+        $timeout = (int) config('watchtower.relay.timeout', 5);
+        $verifySsl = (bool) config('watchtower.forwarder.verify_ssl', true);
         $connectTimeout = (float) config('watchtower.forwarder.connect_timeout', 3);
 
         try {
             $client->post($this->upstream, [
-                'headers'         => $this->headers,
-                'body'            => $this->body,
-                'http_errors'     => false,
-                'timeout'         => $timeout,
+                'headers' => $this->headers,
+                'body' => $this->body,
+                'http_errors' => false,
+                'timeout' => $timeout,
                 'connect_timeout' => $connectTimeout,
-                'verify'          => $verifySsl,
+                'verify' => $verifySsl,
             ]);
         } catch (GuzzleException $e) {
             Log::warning('watchtower: async forward failed', [
                 'upstream' => $this->upstream,
-                'message'  => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
     }

@@ -43,9 +43,9 @@ final class BootstrapPatcher
             return null;
         }
 
-        $last           = end($matches[0]);
-        $lastUseString  = $last[0];
-        $lastUseOffset  = (int) $last[1];
+        $last = end($matches[0]);
+        $lastUseString = $last[0];
+        $lastUseOffset = (int) $last[1];
         $insertPosition = $lastUseOffset + strlen($lastUseString);
 
         return substr($source, 0, $insertPosition)
@@ -61,8 +61,8 @@ final class BootstrapPatcher
             return null;
         }
 
-        $matched        = $match[0][0];
-        $matchOffset    = (int) $match[0][1];
+        $matched = $match[0][0];
+        $matchOffset = (int) $match[0][1];
         $insertPosition = $matchOffset + strlen($matched);
 
         return substr($source, 0, $insertPosition)

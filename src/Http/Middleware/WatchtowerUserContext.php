@@ -120,11 +120,11 @@ class WatchtowerUserContext
 
         foreach ($fields as $field) {
             $value = match ($field) {
-                'id'         => $user->getAuthIdentifier(),
-                'email'      => $user->email ?? null,
-                'name'       => $user->name ?? null,
+                'id' => $user->getAuthIdentifier(),
+                'email' => $user->email ?? null,
+                'name' => $user->name ?? null,
                 'ip_address' => $request->ip(),
-                default      => null,
+                default => null,
             };
 
             if ($value === null || $value === '') {
@@ -158,7 +158,7 @@ class WatchtowerUserContext
             : [];
 
         $excluded = array_unique(array_merge($hidden, self::DENY));
-        $payload  = [];
+        $payload = [];
 
         foreach ($attributes as $key => $value) {
             if (in_array($key, $excluded, true)) {

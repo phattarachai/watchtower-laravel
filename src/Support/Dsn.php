@@ -33,9 +33,9 @@ final class Dsn
         }
 
         $scheme = $parts['scheme'] ?? null;
-        $host   = $parts['host'] ?? null;
-        $user   = $parts['user'] ?? null;
-        $path   = isset($parts['path']) ? ltrim((string) $parts['path'], '/') : '';
+        $host = $parts['host'] ?? null;
+        $user = $parts['user'] ?? null;
+        $path = isset($parts['path']) ? ltrim((string) $parts['path'], '/') : '';
 
         if ($scheme === null || $host === null || $user === null || $path === '') {
             return null;
@@ -45,17 +45,17 @@ final class Dsn
             return null;
         }
 
-        $port           = isset($parts['port']) ? (int) $parts['port'] : null;
-        $hostWithPort   = $port !== null ? $host.':'.$port : $host;
+        $port = isset($parts['port']) ? (int) $parts['port'] : null;
+        $hostWithPort = $port !== null ? $host.':'.$port : $host;
 
         return [
-            'scheme'         => $scheme,
+            'scheme' => $scheme,
             'host_with_port' => $hostWithPort,
-            'host'           => $host,
-            'port'           => $port,
-            'public_key'     => $user,
-            'project_id'     => (int) $path,
-            'relay_url'      => $scheme.'://'.$hostWithPort.$relayPath,
+            'host' => $host,
+            'port' => $port,
+            'public_key' => $user,
+            'project_id' => (int) $path,
+            'relay_url' => $scheme.'://'.$hostWithPort.$relayPath,
         ];
     }
 }

@@ -38,7 +38,7 @@ class ClaudeMcpRegistrar
 
         return [
             'success' => $process->isSuccessful(),
-            'output'  => trim($process->getErrorOutput() ?: $process->getOutput()),
+            'output' => trim($process->getErrorOutput() ?: $process->getOutput()),
         ];
     }
 }

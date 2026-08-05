@@ -14,17 +14,17 @@ namespace Phattarachai\WatchtowerLaravel\Support;
  */
 final class FrontendPatcher
 {
-    public const string MARKER_JS_OPEN  = '// watchtower:sentry-init';
+    public const string MARKER_JS_OPEN = '// watchtower:sentry-init';
 
     public const string MARKER_JS_CLOSE = '// /watchtower:sentry-init';
 
-    public const string MARKER_BLADE_OPEN  = '{{-- watchtower:user-meta --}}';
+    public const string MARKER_BLADE_OPEN = '{{-- watchtower:user-meta --}}';
 
     public const string MARKER_BLADE_CLOSE = '{{-- /watchtower:user-meta --}}';
 
     public static function renderJsSnippet(): string
     {
-        $open  = self::MARKER_JS_OPEN;
+        $open = self::MARKER_JS_OPEN;
         $close = self::MARKER_JS_CLOSE;
 
         return <<<JS
@@ -38,7 +38,7 @@ final class FrontendPatcher
 
     public static function renderBladeSnippet(): string
     {
-        $open  = self::MARKER_BLADE_OPEN;
+        $open = self::MARKER_BLADE_OPEN;
         $close = self::MARKER_BLADE_CLOSE;
 
         return <<<BLADE

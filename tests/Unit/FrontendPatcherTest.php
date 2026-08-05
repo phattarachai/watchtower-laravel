@@ -5,7 +5,7 @@ declare(strict_types=1);
 use Phattarachai\WatchtowerLaravel\Support\FrontendPatcher;
 
 beforeEach(function (): void {
-    $this->jsPath    = tempnam(sys_get_temp_dir(), 'wt-js-');
+    $this->jsPath = tempnam(sys_get_temp_dir(), 'wt-js-');
     $this->bladePath = tempnam(sys_get_temp_dir(), 'wt-blade-');
 });
 
@@ -62,7 +62,7 @@ it('inserts the meta block immediately before </head>', function (): void {
         ->and($contents)->toContain('@watchtowerUser')
         ->and($contents)->toContain(FrontendPatcher::MARKER_BLADE_CLOSE);
 
-    $headEnd  = strpos($contents, '</head>');
+    $headEnd = strpos($contents, '</head>');
     $blockEnd = strpos($contents, FrontendPatcher::MARKER_BLADE_CLOSE);
 
     expect($blockEnd)->toBeLessThan($headEnd);

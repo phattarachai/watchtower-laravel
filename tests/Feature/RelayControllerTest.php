@@ -14,8 +14,8 @@ use Phattarachai\WatchtowerLaravel\Jobs\ForwardEnvelope;
 
 function bindMockGuzzle(array $responses, array &$history = []): void
 {
-    $mock        = new MockHandler($responses);
-    $stack       = HandlerStack::create($mock);
+    $mock = new MockHandler($responses);
+    $stack = HandlerStack::create($mock);
     $stack->push(Middleware::history($history));
 
     app()->instance(Client::class, new Client(['handler' => $stack]));
@@ -25,7 +25,7 @@ it('forwards envelope to upstream and returns its response', function (): void {
     $history = [];
     bindMockGuzzle([
         new GuzzleResponse(200, [
-            'Content-Type'                   => 'application/json',
+            'Content-Type' => 'application/json',
             'X-Sentry-Rate-Limits-Remaining' => '99',
         ], '{"id":"evt_1"}'),
     ], $history);
