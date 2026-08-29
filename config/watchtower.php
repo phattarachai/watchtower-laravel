@@ -14,6 +14,85 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 return [
     'dsn' => env('WATCHTOWER_DSN', env('SENTRY_LARAVEL_DSN')),
 
+    // relay      — forward every envelope to the central Watchtower server.
+    // standalone — store and process events in this app's own database.
+    // dual       — store locally AND forward upstream.
+    'mode' => env('WATCHTOWER_MODE', 'relay'),
+
+    'server' => [
+        // null = the host application's default database connection.
+        'connection' => env('WATCHTOWER_DB_CONNECTION'),
+
+        // URL prefix for the embedded ingest endpoints and (later) the UI.
+        // A project DSN reads `scheme://key@host/<path>/<project id>` — the
+        // Sentry SDK appends `/api/<project id>` to the prefix itself.
+        'path' => env('WATCHTOWER_PATH', 'watchtower'),
+
+        'retention_days' => (int) env('WATCHTOWER_RETENTION_DAYS', 90),
+
+        // How this app's own exceptions reach the embedded store.
+        // 'transport' — swap the Sentry SDK transport for an in-process one:
+        //               no HTTP request, no queue worker needed to ingest.
+        // 'loopback'  — leave the SDK's HTTP transport alone; the event travels
+        //               over the network back into this app's ingest route.
+        // false       — do not self-capture at all.
+        'self_capture' => env('WATCHTOWER_SELF_CAPTURE', 'transport'),
+
+        // The embedded MCP server mounted at /{path}/mcp. Requires laravel/mcp;
+        // the provider skips registration when the package is absent.
+        'mcp' => [
+            'enabled' => filter_var(env('WATCHTOWER_MCP_ENABLED', true), FILTER_VALIDATE_BOOL),
+            'middleware' => ['throttle:60,1'],
+        ],
+
+        'queue' => [
+            'connection' => env('WATCHTOWER_QUEUE_CONNECTION'),
+            'name' => env('WATCHTOWER_QUEUE_NAME'),
+        ],
+
+        // The embedded Inertia UI mounted under the same `path` prefix. The
+        // AuthorizeUi middleware is always appended by the service provider,
+        // so the gate can never be forgotten by editing `middleware`.
+        'ui' => [
+            'enabled' => filter_var(env('WATCHTOWER_UI_ENABLED', true), FILTER_VALIDATE_BOOL),
+
+            'domain' => env('WATCHTOWER_UI_DOMAIN'),
+
+            'middleware' => ['web'],
+
+            // Where a *guest* is sent when the gate says no. A route name
+            // (preferred) or a URL; null 403s instead, and so does a
+            // signed-in user the gate still rejects.
+            'redirect_guests_to' => env('WATCHTOWER_UI_LOGIN_ROUTE', 'login'),
+        ],
+
+        'rate_limit_per_min' => (int) env('WATCHTOWER_RATE_LIMIT_PER_MIN', 300),
+
+        'max_payload_bytes' => (int) env('WATCHTOWER_MAX_PAYLOAD_BYTES', 1_048_576),
+
+        'ingest' => [
+            // Top-level keys retained from a Sentry event payload. Anything
+            // else is dropped before the row is written.
+            'allowed_event_fields' => [
+                'event_id', 'timestamp', 'platform', 'level', 'logger',
+                'transaction', 'server_name', 'release', 'environment',
+                'message', 'exception', 'request', 'user', 'contexts',
+                'tags', 'extra', 'breadcrumbs', 'sdk', 'fingerprint',
+            ],
+
+            'allowed_context_keys' => [
+                'os', 'runtime', 'browser', 'device',
+                'laravel', 'livewire', 'job', 'trace',
+            ],
+
+            'scrub' => [
+                'header_keys' => ['cookie', 'authorization', 'x-csrf-token', 'x-api-key', 'x-auth-token'],
+                'body_keys' => ['password', 'pwd', 'passwd', 'token', 'secret', 'api_key', 'access_token', 'refresh_token', 'authorization'],
+                'placeholder' => '[Filtered]',
+            ],
+        ],
+    ],
+
     'relay' => [
         'enabled' => env('WATCHTOWER_RELAY_ENABLED', true),
         'path' => env('WATCHTOWER_RELAY_PATH', '/api/watchtower-relay'),

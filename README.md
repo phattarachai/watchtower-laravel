@@ -26,11 +26,89 @@ The install command:
 
 Re-running is idempotent. Pass `--dry-run` to preview changes.
 
+## Standalone mode
+
+Standalone drops the central Watchtower server entirely: this app owns the tables, the ingest endpoint, the issue UI
+and an MCP server of its own.
+
+```bash
+php artisan watchtower:install --standalone
+```
+
+On top of the steps above it:
+
+1. Writes `WATCHTOWER_MODE=standalone` and runs `php artisan migrate --force` to create the `watchtower_*` tables.
+2. Creates the first project (named after `APP_NAME`) and points `SENTRY_LARAVEL_DSN` at its DSN.
+3. Publishes `resources/js/pages/Watchtower.jsx`, adds the `@watchtower` Vite alias, and appends
+   `@import 'tailwindcss' prefix(tw);` plus the package `@source` line to `resources/css/app.css`.
+4. Prints the authorization snippet and registers the embedded MCP server at `/watchtower/mcp` with Claude Code.
+
+`--mode=dual` does all of that and keeps forwarding browser envelopes to a central Watchtower as well, so it still
+prompts for the upstream DSN.
+
+The two build-tool edits the package cannot make for you if your project deviates from the default layout:
+
+```js
+// vite.config.js
+resolve: {
+    alias: {
+        '@watchtower': './vendor/phattarachai/watchtower-laravel/resources/js/watchtower',
+    },
+},
+```
+
+```css
+/* resources/css/app.css */
+@import 'tailwindcss' prefix(tw);
+@source '../../vendor/phattarachai/watchtower-laravel/resources/js/watchtower/**/*.jsx';
+```
+
+Only the page stub lives in your tree — the module itself is reached through the alias, so there is no second copy to
+drift. Authorize the UI from a service provider:
+
+```php
+Watchtower::auth(fn ($request): bool => $request->user()?->isAdmin() === true);
+```
+
+Then verify everything with `php artisan watchtower:doctor`, which checks the tables, the routes, both build-tool
+edits, the mailer, the queue, the MCP registration and the self-capture path, and names whatever is missing.
+
+### Embedded commands
+
+| Command                                     | Purpose                                                             |
+| ------------------------------------------- | ------------------------------------------------------------------- |
+| `watchtower:doctor`                         | Report every host-app requirement, green or red.                    |
+| `watchtower:project list`                   | Projects with masked keys and full DSNs.                            |
+| `watchtower:project create "Name"`          | New project; prints its DSN. `--platform=` to override `laravel`.   |
+| `watchtower:project rotate-key {id\|slug}`   | Issue a fresh public key.                                           |
+| `watchtower:project activate/deactivate`    | Stop or resume accepting events for one project.                    |
+| `watchtower:prune`                          | Drop events past retention (scheduled daily on its own).            |
+
+### Self-capture
+
+By default this app's own exceptions never leave the process: the Sentry SDK's HTTP transport is swapped for an
+in-process one that hands the serialized envelope straight to the ingest pipeline, `before_send` scrubbing intact.
+Set `WATCHTOWER_SELF_CAPTURE=loopback` to keep the SDK's HTTP transport (events travel over the network back into
+this app's ingest route), or `false` to disable self-capture entirely.
+
+### MCP
+
+Install `laravel/mcp` and the server mounts at `/{prefix}/mcp`, authenticated with any active project's public key —
+`Authorization: Bearer {public_key}` or `?api_key=`. Every tool is scoped to that project. The tools mirror the
+central server: `list_issues`, `get_issue`, `list_events`, `get_event`, `get_stats`, `resolve_issue`, `ignore_issue`,
+`unresolve_issue`, `snooze_issue`.
+
 ## Configuration
 
 | Env key                       | Default                     | Purpose                                                          |
 | ----------------------------- | --------------------------- | ---------------------------------------------------------------- |
 | `WATCHTOWER_DSN`              | falls back to `SENTRY_LARAVEL_DSN` | Watchtower DSN: `http://{key}@{host}/{numeric-project-id}`. |
+| `WATCHTOWER_MODE`             | `relay`                     | `relay`, `standalone` or `dual`.                                 |
+| `WATCHTOWER_PATH`             | `watchtower`                | URL prefix for the embedded ingest, UI and MCP endpoints.        |
+| `WATCHTOWER_DB_CONNECTION`    | _(default connection)_      | Connection the `watchtower_*` tables live on.                    |
+| `WATCHTOWER_RETENTION_DAYS`   | `90`                        | Event retention; a project row may override it.                  |
+| `WATCHTOWER_SELF_CAPTURE`     | `transport`                 | `transport`, `loopback` or `false`.                              |
+| `WATCHTOWER_MCP_ENABLED`      | `true`                      | Mount the embedded MCP server (needs `laravel/mcp`).             |
 | `WATCHTOWER_RELAY_ENABLED`    | `true`                      | Register the relay route on boot.                                |
 | `WATCHTOWER_RELAY_PATH`       | `/api/watchtower-relay`     | Relay endpoint path (must live under `/api/`).                   |
 | `WATCHTOWER_RELAY_TIMEOUT`    | `5`                         | Upstream request timeout (seconds).                              |

@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Phattarachai\WatchtowerLaravel\Jobs\ForwardEnvelope;
+use Phattarachai\WatchtowerLaravel\Server\EnvelopeAccepter;
 use Phattarachai\WatchtowerLaravel\Support\Dsn;
 
 class RelayController
@@ -26,6 +27,38 @@ class RelayController
     ];
 
     public function __invoke(Request $request): Response|JsonResponse
+    {
+        $mode = (string) config('watchtower.mode', 'relay');
+
+        if ($mode === 'relay') {
+            return $this->relay($request);
+        }
+
+        $local = $this->ingestLocally($request);
+
+        return $mode === 'dual' ? $this->relay($request) : $local;
+    }
+
+    /**
+     * Store the envelope in this app's own tables, authenticating off the DSN
+     * the SDK embeds in the envelope header.
+     */
+    protected function ingestLocally(Request $request): JsonResponse
+    {
+        $accepter = app(EnvelopeAccepter::class);
+        $envelope = $accepter->parse($accepter->body($request));
+        $project = $accepter->projectFromEnvelope($envelope['header']);
+
+        if ($project === null) {
+            return new JsonResponse(['error' => 'project_not_found'], 404);
+        }
+
+        return new JsonResponse([
+            'id' => $accepter->ingest($project, $envelope, $accepter->sdkNameFromEnvelope($envelope['header'])),
+        ]);
+    }
+
+    protected function relay(Request $request): Response|JsonResponse
     {
         $relayPath = (string) config('watchtower.relay.path', '/api/watchtower-relay');
         $parsed = Dsn::parse(config('watchtower.dsn'), $relayPath);

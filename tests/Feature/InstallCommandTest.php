@@ -65,8 +65,14 @@ afterEach(function (): void {
 
     @unlink(base_path('vite.config.js'));
     @unlink(resource_path('js/vendor/watchtower.js'));
+    @unlink(resource_path('js/vendor/livewire.js'));
     @rmdir(resource_path('js/vendor'));
     @rmdir(resource_path('js'));
+
+    // vendor:publish drops config/watchtower.php into the Testbench skeleton,
+    // where it shadows the package config on every later run — mergeConfigFrom
+    // is shallow, so a stale copy silently drops newly added keys.
+    @unlink(config_path('watchtower.php'));
 });
 
 it('writes env keys and patches bootstrap/app.php', function (): void {

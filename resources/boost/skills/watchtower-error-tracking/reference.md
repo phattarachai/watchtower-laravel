@@ -1,7 +1,7 @@
 ---
 name: watchtower-error-tracking-reference
-description: End-to-end install reference for wiring Watchtower error tracking into a new project. Covers Laravel backends (via the phattarachai/watchtower-laravel package, one command — including the package's smart defaults: multi-guard user-context middleware, BeforeSend noise filter + secret scrubbing, breadcrumb env keys), browser JavaScript frontends (via @sentry/browser with the tunnel option and the published applyWatchtowerUser helper), the verify-via-REST flow, the project-scoped MCP server for in-conversation triage from Claude Code, and troubleshooting. Read this when SKILL.md directs you here, or when the user wants to install, configure, verify, triage, or troubleshoot Watchtower error tracking.
-version: 2026.05.18.2
+description: End-to-end install reference for wiring Watchtower error tracking into a new project. Covers Laravel backends (via the phattarachai/watchtower-laravel package, one command — including the package's smart defaults: multi-guard user-context middleware, BeforeSend noise filter + secret scrubbing, breadcrumb env keys), the embedded standalone/dual server the same package can run inside the host app, browser JavaScript frontends (via @sentry/browser with the tunnel option and the published initWatchtower helper), the verify-via-REST flow, the project-scoped MCP server for in-conversation triage from Claude Code, and troubleshooting. Read this when SKILL.md directs you here, or when the user wants to install, configure, verify, triage, or troubleshoot Watchtower error tracking.
+version: 2026.08.30.1
 ---
 
 # Watchtower install — reference
@@ -32,14 +32,17 @@ To split: after `watchtower:install`, edit `.env` to point `VITE_SENTRY_DSN` at 
 ## DSN format — must be numeric
 
 ```
-https://{public_key}@{host}/{numeric_project_id}
+https://{public_key}@{host}/{numeric_project_id}                    # central Watchtower
+https://{public_key}@{host}/{path_prefix}/{numeric_project_id}      # embedded (standalone/dual)
 ```
 
 The project segment **MUST** be the project's numeric id. Stock Sentry SDKs validate at `Dsn::parse()` time and silently no-op the transport if the segment isn't `\d+`. The slug works in cURL pokes but breaks every real SDK. The settings page renders the numeric form by default — copy it verbatim.
 
+An **embedded** host serves Watchtower under a URL prefix (`watchtower.server.path`, default `watchtower`), and that prefix goes into the DSN path in front of the project id — with **no `api` segment of its own**. Every SDK appends `/api/{project_id}/envelope/` to the DSN path itself, so `https://key@shop.test/watchtower/2` is what reaches `https://shop.test/watchtower/api/2/envelope/`, which is the registered route. Writing the `api` segment yourself, or dropping the prefix, gives a silent 404 per event. `php artisan watchtower:project list` prints the correct DSN for every project — copy it rather than assembling one.
+
 ## Laravel install (one command)
 
-For any Laravel 12 / 13 project (with or without a Vite frontend), use the install package.
+For any Laravel 12 / 13 project (with or without a Vite frontend), use the install package. This section describes the default **relay** install; add `--standalone` or `--mode=dual` for the embedded server ([Standalone / dual mode](#standalone--dual-mode-embedded-server)).
 
 ```bash
 composer require phattarachai/watchtower-laravel
@@ -63,8 +66,10 @@ Then it registers the project-scoped MCP server with Claude Code if the `claude`
 
 Flags:
 - `--dsn=…` — Watchtower DSN. Skips the prompt.
+- `--standalone` / `--mode=relay|standalone|dual` — pick the mode. Default `relay`.
 - `--dry-run` — print intended changes (env diff + `bootstrap/app.php` unified diff) without writing.
 - `--no-mcp` — skip registering the Watchtower HTTP MCP server with Claude Code.
+- `--patch-js` / `--patch-views` — inject the frontend snippets instead of printing them (idempotent, sentinel-guarded).
 
 After install: `php artisan watchtower:test` sends a synthetic exception through both the Laravel SDK path and the local relay path.
 
@@ -107,6 +112,67 @@ Opt in to async by setting `WATCHTOWER_RELAY_ASYNC=true` — the relay dispatche
 | `SENTRY_BREADCRUMBS_REDIS_COMMANDS_ENABLED` | (`true` after install) | Sentry SDK key. Redis command crumbs. |
 
 Two more knobs live in `config/watchtower.php` only (arrays — too much for an env var): `watchtower.user_context.fields` (see [User context middleware](#user-context-middleware) below) and `watchtower.before_send.{ignored_exceptions, scrub_keys}` (see [BeforeSend pipeline](#beforesend-pipeline) below).
+
+## Standalone / dual mode (embedded server)
+
+`WATCHTOWER_MODE` (`relay` | `standalone` | `dual`) decides whether the app reports to a Watchtower or *is* one. `relay` is the default and registers nothing extra. See `SKILL.md` § "Pick a mode first" for the choice and the install commands; this section is the configuration and operations detail.
+
+### What standalone/dual adds
+
+Six `watchtower_*` tables (json columns — SQLite, MySQL and Postgres all work), an ingest endpoint at `POST /{prefix}/api/{project}/envelope`, an Inertia + React console at `/{prefix}`, per-project alert-rule email, and an MCP server at `/{prefix}/mcp`. `ProcessEventJob` does the same scrub → normalize → fingerprint → group-upsert pipeline as the central server.
+
+This app's own exceptions reach the store through `watchtower.server.self_capture`:
+
+| Value | How |
+|---|---|
+| `transport` (default) | The SDK's HTTP transport is swapped for an in-process one — no socket, no round trip. `BeforeSend` still runs first. |
+| `loopback` | The SDK posts over HTTP back into the app's own ingest route. Use when you specifically want the wire path exercised. |
+| `false` | No self-capture. |
+
+### Env keys
+
+| Env key | Default | Purpose |
+|---|---|---|
+| `WATCHTOWER_MODE` | `relay` | `relay` / `standalone` / `dual`. |
+| `WATCHTOWER_PATH` | `watchtower` | URL prefix for ingest, console and MCP. Also the DSN path segment. |
+| `WATCHTOWER_DB_CONNECTION` | (host default) | Put the tables on a separate connection if you want them out of the main database. |
+| `WATCHTOWER_RETENTION_DAYS` | `90` | Event retention; a project row's `retention_days` overrides it. Groups are kept forever. |
+| `WATCHTOWER_SELF_CAPTURE` | `transport` | See table above. |
+| `WATCHTOWER_UI_ENABLED` | `true` | `false` for a headless install — ingest + alerts + MCP, no console, no Inertia/Tailwind requirement. |
+| `WATCHTOWER_UI_DOMAIN` | `null` | Serve the console on its own domain. |
+| `WATCHTOWER_UI_LOGIN_ROUTE` | `login` | Route name (or URL) a rejected **guest** is redirected to. `null` 403s instead. |
+| `WATCHTOWER_MCP_ENABLED` | `true` | Registration is skipped anyway when `laravel/mcp` isn't installed. |
+| `WATCHTOWER_RATE_LIMIT_PER_MIN` | `300` | Per-project ingest throttle, over the host's cache store — no Redis needed. |
+| `WATCHTOWER_MAX_PAYLOAD_BYTES` | `1048576` | Reject bigger envelope bodies. |
+| `WATCHTOWER_QUEUE_CONNECTION` / `WATCHTOWER_QUEUE_NAME` | (host default) | Where `ProcessEventJob` runs. `sync` is fine for a small install — events are normalized inline. |
+
+Array-only knobs under `watchtower.server.ingest`: `allowed_event_fields`, `allowed_context_keys`, and `scrub.{header_keys, body_keys, placeholder}` — the allow-list applied before the row is written.
+
+### Access control
+
+The console is open in the `local` environment and closed everywhere else until the host registers a check — `Watchtower::auth(fn ($request) => …)`, or a `viewWatchtower` gate. The `AuthorizeUi` middleware is appended by the service provider and cannot be removed by editing `watchtower.server.ui.middleware`.
+
+### Alerts
+
+Rules live on `watchtower_alert_rules` and use the same types and suppression semantics as the central server. The one difference: **recipients are the literal addresses in the rule's `targets.emails`** — there is no user directory, so `targets.user_ids` and per-user mute preferences have no meaning. Nothing is seeded, so a fresh project alerts on nothing until you add a rule (console → Alerts, or `POST /{prefix}/alerts`). Publish `--tag=watchtower-views` to override the alert mailable.
+
+### Operations
+
+| Command | Use |
+|---|---|
+| `watchtower:doctor` | The verification step for embedded installs. Checks tables, routes, the published Inertia page, the Vite alias, the Tailwind lines, an active project, and that self-capture is bound. Advisories for mailer, queue driver and missing `laravel/mcp`. |
+| `watchtower:project {list\|create\|rotate-key\|activate\|deactivate}` | Project management without a browser. `list` prints keys and DSNs. |
+| `watchtower:prune` | Scheduled daily by the package. Deletes events past retention and notification rows older than 90 days; issue groups survive. |
+
+### Host build requirements
+
+The console is an Inertia page. `watchtower:install` handles all three, but they're what a manual wire-up must reproduce:
+
+1. `resources/js/pages/Watchtower.jsx` published into the host (the host's `import.meta.glob` never leaves `./pages`).
+2. A `@watchtower` alias in `vite.config.{js,ts}` pointing at `./vendor/phattarachai/watchtower-laravel/resources/js/watchtower`.
+3. In the Tailwind v4 entry stylesheet: `@import 'tailwindcss' prefix(tw);` and `@source '../../vendor/phattarachai/watchtower-laravel/resources/js/watchtower/**/*.jsx';`. Without the `@source`, Tailwind emits none of the module's classes and the console renders unstyled.
+
+The module's colours come from `--wt-*` variables on `.wt-root` — override them to re-skin.
 
 ## Smart defaults
 
@@ -284,7 +350,7 @@ bun add @sentry/browser
 npm run build   # or pnpm build / yarn build / bun run build
 ```
 
-The `tunnel` option is non-negotiable for production deployments. Without it, ~10–30% of users with ad blockers will silently fail to report errors. The `applyWatchtowerUser()` call after `Sentry.init` is what fills Watchtower's User tab for browser-side exceptions — without it, you get the same User tab population gap on the browser side that disabling the middleware causes on the server side. Leave `ignoreErrors` commented at first; turn individual lines on once you've seen the actual noise in your project's Watchtower inbox.
+The `tunnel` option is non-negotiable for production deployments. Without it, ~10–30% of users with ad blockers will silently fail to report errors. The user-context step inside `initWatchtower()` is what fills Watchtower's User tab for browser-side exceptions — without it, you get the same User tab population gap on the browser side that disabling the middleware causes on the server side. Leave `ignoreErrors` commented at first; turn individual lines on once you've seen the actual noise in your project's Watchtower inbox.
 
 ### Verify the browser side
 
@@ -534,9 +600,14 @@ DSN holder gets read **and** mutate access for that one project. Per-user / per-
 | `/api/v1/events/{id}` returns 404 right after sending | Async ingestion hasn't drained yet | Retry after 2–5s |
 | MCP: `claude mcp add` succeeds but tool calls fail with `Unauthenticated` | Bearer token revoked / wrong DSN | Re-copy DSN from project settings; re-run `claude mcp add` |
 | MCP: tool says "Issue not found in this project" but the issue is visible in the Watchtower UI | The issue belongs to a different Watchtower project than the DSN key you registered | Re-run `claude mcp add` with the DSN key for the project that owns the issue, or register a second MCP server alongside the first with a distinct name |
-| User tab in Watchtower is empty despite a logged-in user triggering the exception | Smart-defaults chain broken at one of three points | Check (a) `SENTRY_SEND_DEFAULT_PII=true` — without it Sentry strips request data + IP before BeforeSend runs; (b) `WATCHTOWER_USER_CONTEXT` not set to `false`; (c) the right guard is listed in `WATCHTOWER_USER_CONTEXT_GUARDS` (or it's `auto`); (d) for browser-side, the `<meta name="watchtower-user-*">` tags are in `<head>` AND `applyWatchtowerUser()` is called after `Sentry.init`. See [Smart defaults](#smart-defaults). |
+| User tab in Watchtower is empty despite a logged-in user triggering the exception | Smart-defaults chain broken at one of three points | Check (a) `SENTRY_SEND_DEFAULT_PII=true` — without it Sentry strips request data + IP before BeforeSend runs; (b) `WATCHTOWER_USER_CONTEXT` not set to `false`; (c) the right guard is listed in `WATCHTOWER_USER_CONTEXT_GUARDS` (or it's `auto`); (d) for browser-side, the `<meta name="watchtower-user-*">` tags are in `<head>` (via `@watchtowerUser`) AND `initWatchtower()` is called. See [Smart defaults](#smart-defaults). |
 | Inbox is suddenly missing `ValidationException` / `404` / auth-fail events | BeforeSend smart-default is dropping them — this is the design | If you actually want these in the inbox, edit `watchtower.before_send.ignored_exceptions` and remove the relevant class, or set `WATCHTOWER_BEFORE_SEND=false` to disable the filter entirely. |
 | Request body in event payload shows `[Filtered]` for a non-secret field | The field name matches an entry in `watchtower.before_send.scrub_keys` (case-insensitive) | Edit `watchtower.before_send.scrub_keys` to remove the entry, or rename the field. |
+| Standalone: a child app's events 404 at ingest | Its DSN has an `api` segment, or is missing the path prefix | Copy the DSN from `php artisan watchtower:project list` verbatim — see [DSN format](#dsn-format--must-be-numeric) |
+| Standalone: `/watchtower` renders unstyled | The Tailwind `@source` line for the package is missing, so none of the module's classes were emitted | `php artisan watchtower:doctor`, then add the line it names and rebuild |
+| Standalone: `/watchtower` 403s for an admin | No auth check registered — the gate is closed outside `local` by default | Register `Watchtower::auth(...)` or a `viewWatchtower` gate |
+| Dual: backend exceptions never reach the central Watchtower | By design — the install points `SENTRY_LARAVEL_DSN` at the local project | Use `relay` mode if the central inbox must see server-side events |
+| Standalone: events accepted but the issue list stays empty | A queue worker isn't running for `WATCHTOWER_QUEUE_CONNECTION` | Start a worker, or set the connection to `sync` for a small install |
 
 ## Updating this skill
 

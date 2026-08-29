@@ -1,7 +1,7 @@
 ---
 name: watchtower-error-tracking
 description: "Wire up Watchtower (a self-hosted, Sentry-compatible exception tracker) into a Laravel or browser app, and connect Claude Code to its MCP server for in-conversation issue triage. Triggers on \"Watchtower\", \"set up error tracking\", \"verify the exception was reported\", WATCHTOWER_DSN, SENTRY_LARAVEL_DSN, or VITE_SENTRY_DSN."
-version: 2026.08.05.1
+version: 2026.08.30.1
 ---
 
 # Watchtower error tracking
@@ -20,7 +20,57 @@ Watchtower is a self-hosted, Sentry-compatible exception tracker. Client apps re
 
 Config lives in `config/watchtower.php`; every default above is opt-out via env (see [Smart defaults](#smart-defaults-laravel-package)). `php artisan watchtower:test` verifies backend, relay, and frontend wiring end to end.
 
+## Pick a mode first
+
+`WATCHTOWER_MODE` decides whether this app *reports to* a Watchtower or *is* one. Ask before installing if it isn't obvious.
+
+| Mode | Choose it when | What you get |
+|---|---|---|
+| `relay` (default) | There's a central Watchtower and this app is one of several reporting to it. | Everything in the list above. No tables, no UI. |
+| `standalone` | One app, no second host to run, or the errors must not leave this machine. Also the right answer when the app has child services (a WordPress site, a Next.js frontend) that need somewhere to report. | Own `watchtower_*` tables, ingest endpoint, Inertia console at `/{prefix}`, alert emails, MCP server. |
+| `dual` | Browser errors should keep flowing to the central fleet inbox, but server-side detail stays local. | Both — but note the asymmetry below. |
+
+> **Dual is not a mirror.** Browser envelopes are stored locally *and* forwarded upstream; this app's own backend exceptions land only in the local store, because the install points `SENTRY_LARAVEL_DSN` at the local project.
+
+### Standalone install
+
+```bash
+composer require phattarachai/watchtower-laravel
+php artisan watchtower:install --standalone   # or --mode=dual (also prompts for the upstream DSN)
+npm run build
+php artisan watchtower:doctor
+```
+
+`--standalone` runs the relay steps (env keys, `bootstrap/app.php` patch, config publish, frontend wiring) *plus*: writes `WATCHTOWER_MODE`, migrates six `watchtower_*` tables, creates the first project and points `SENTRY_LARAVEL_DSN` at its local DSN, publishes `resources/js/pages/Watchtower.jsx`, patches the host's `vite.config` and `app.css`, and registers the local MCP server.
+
+Then do the one thing it can't: **grant access to the console.** It's wide open in `local` and 403 everywhere else until you register a check.
+
+```php
+use Phattarachai\WatchtowerLaravel\Watchtower;
+
+Watchtower::auth(fn ($request): bool => $request->user()?->isAdmin() === true);
+// …or define a `viewWatchtower` gate instead.
+```
+
+`watchtower:doctor` is the verification step here, not `watchtower:test` — it checks tables, routes, the published page, the Vite alias, the two Tailwind lines, an active project, and that self-capture is actually bound. Treat every failure as real; the advisories (mailer, queue driver, `laravel/mcp` missing) are informational.
+
+Host requirements: **Inertia + React** with an `import.meta.glob` over `resources/js/pages`, and a **Tailwind v4** entry stylesheet — the install adds `@import 'tailwindcss' prefix(tw);` and an `@source` line pointing into the package. Set `WATCHTOWER_UI_ENABLED=false` for a headless install (ingest + alerts + MCP, no console) if the host has neither. No Redis is needed; the `sync` queue works.
+
+Manage projects without the browser: `php artisan watchtower:project {list|create|rotate-key|activate|deactivate}`. `list` prints each project's key and DSN.
+
+### Pointing child apps at a standalone host
+
+Any Sentry SDK — WordPress, Next.js, another Laravel service — reports to the standalone host with a DSN of this shape:
+
+```
+{scheme}://{public_key}@{host}/{prefix}/{project_id}
+```
+
+e.g. `https://ab12…@shop.test/watchtower/2`. Create the project with `watchtower:project create "Storefront"` and copy the DSN it prints. **The prefix goes in front of the project id and there is no `api` segment** — the SDK appends `/api/{project_id}/envelope/` itself, so that DSN resolves to `https://shop.test/watchtower/api/2/envelope/`. Adding `api` yourself, or dropping the prefix, produces a silent 404 per event. Browser SDKs on a different origin still want a `tunnel` (see `reference.md` § "Browser-only setup").
+
 ## Provision the project (headless)
+
+*Relay mode only — a standalone install creates its own first project during `watchtower:install`.*
 
 If you don't yet have a DSN, you can create the Watchtower project and mint one without
 leaving the terminal — no clicking through the UI. This needs a **Personal Access Token**
@@ -53,7 +103,7 @@ echo '<token>' > ~/.watchtower/token && chmod 600 ~/.watchtower/token
 **No PAT?** Fall back to the manual onboarding flow below — create the project in the
 Watchtower UI, copy its DSN, and run `watchtower:install` (it prompts for the DSN).
 
-## Install in 3 commands
+## Install in 3 commands (relay mode)
 
 ```bash
 composer require phattarachai/watchtower-laravel
@@ -114,6 +164,13 @@ claude mcp add --transport http --scope project watchtower https://watchtower.ph
 ```
 
 `<PUBLIC_KEY>` is the project's DSN public_key — the segment between `https://` and `@` in `SENTRY_LARAVEL_DSN`. It's already shipped to browsers via `VITE_SENTRY_DSN`, so committing it in `.mcp.json` is safe. If you actually split backend and browser into two Watchtower projects (rare — see `reference.md` § "When to split into two projects"), register one MCP server per project with distinct names (e.g. `watchtower-backend`, `watchtower-frontend`).
+
+**Standalone / dual installs** serve the same tools from the app itself at `{APP_URL}/{prefix}/mcp` (default prefix `watchtower`), authenticated with a project's public key from `watchtower:project list`. It needs `composer require laravel/mcp` — the package suggests rather than requires it, and `watchtower:doctor` says so when it's missing. Nine tools, all scoped to the one project whose key authenticated the request (the central server's key widens to the whole team; this one does not).
+
+```bash
+claude mcp add --transport http --scope project watchtower https://shop.test/watchtower/mcp \
+  --header "Authorization: Bearer <PROJECT_PUBLIC_KEY>"
+```
 
 ## MCP triage (when `mcp__watchtower__*` tools are connected)
 

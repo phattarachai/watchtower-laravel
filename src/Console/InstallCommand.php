@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace Phattarachai\WatchtowerLaravel\Console;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Str;
+use Phattarachai\WatchtowerLaravel\Server\Models\Project;
 use Phattarachai\WatchtowerLaravel\Support\BootstrapPatcher;
 use Phattarachai\WatchtowerLaravel\Support\ClaudeMcpRegistrar;
 use Phattarachai\WatchtowerLaravel\Support\Dsn;
+use Phattarachai\WatchtowerLaravel\Support\EmbeddedUiPatcher;
 use Phattarachai\WatchtowerLaravel\Support\EnvWriter;
 use Phattarachai\WatchtowerLaravel\Support\FilamentPanelDetector;
 use Phattarachai\WatchtowerLaravel\Support\FrontendPatcher;
@@ -29,8 +32,13 @@ class InstallCommand extends Command
         'SENTRY_BREADCRUMBS_REDIS_COMMANDS_ENABLED' => 'true',
     ];
 
+    /** @var list<string> */
+    private const array MODES = ['relay', 'standalone', 'dual'];
+
     protected $signature = 'watchtower:install
         {--dsn= : Watchtower DSN, e.g. http://key@host/42}
+        {--mode= : relay (default), standalone or dual}
+        {--standalone : Shorthand for --mode=standalone}
         {--dry-run : Print intended changes without writing files}
         {--no-mcp : Skip registering the Watchtower MCP server with Claude Code}
         {--patch-js : Auto-inject the Sentry init snippet into detected Vite entries}
@@ -41,6 +49,38 @@ class InstallCommand extends Command
     public function handle(): int
     {
         $dryRun = (bool) $this->option('dry-run');
+        $mode = $this->resolveMode();
+
+        if ($mode === null) {
+            return self::FAILURE;
+        }
+
+        return $mode === 'relay'
+            ? $this->installRelay($dryRun)
+            : $this->installEmbedded($mode, $dryRun);
+    }
+
+    private function resolveMode(): ?string
+    {
+        $mode = (bool) $this->option('standalone')
+            ? 'standalone'
+            : (string) ($this->option('mode') ?? '');
+
+        if ($mode === '') {
+            return 'relay';
+        }
+
+        if (in_array($mode, self::MODES, true)) {
+            return $mode;
+        }
+
+        $this->error("Unknown mode [{$mode}]. Expected one of: ".implode(', ', self::MODES).'.');
+
+        return null;
+    }
+
+    private function installRelay(bool $dryRun): int
+    {
         $dsn = $this->resolveDsn();
 
         if ($dsn === null) {
@@ -51,21 +91,295 @@ class InstallCommand extends Command
         $this->confirmPii($dryRun);
         $this->writeBreadcrumbEnvKeys($dryRun);
         $this->patchBootstrap($dryRun);
-
-        if (! $dryRun) {
-            $this->call('vendor:publish', ['--tag' => 'watchtower-config', '--force' => true]);
-        }
-
+        $this->publishConfig($dryRun);
         $this->configureFrontend($dsn, $dryRun);
         $this->installMcp($dsn, $dryRun);
-
-        if ($dryRun) {
-            $this->info('--dry-run: no files were modified.');
-        } else {
-            $this->info('Verify with: php artisan watchtower:test');
-        }
+        $this->emitClosing($dryRun);
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Standalone and dual both own tables, an ingest route and the embedded UI
+     * in this app. Dual additionally keeps the upstream DSN so browser
+     * envelopes are still forwarded to the central Watchtower.
+     */
+    private function installEmbedded(string $mode, bool $dryRun): int
+    {
+        $upstream = $mode === 'dual' ? $this->resolveDsn() : null;
+
+        if ($mode === 'dual' && $upstream === null) {
+            return self::FAILURE;
+        }
+
+        $this->writeModeEnv($mode, $dryRun);
+
+        if ($upstream !== null) {
+            $this->writeEnvKeys($upstream, $dryRun);
+        }
+
+        $this->migrate($dryRun);
+        $project = $this->ensureFirstProject($dryRun);
+        $localDsn = $this->localDsn($project);
+
+        $this->writeLocalSentryDsn($localDsn, $dryRun);
+        $this->confirmPii($dryRun);
+        $this->writeBreadcrumbEnvKeys($dryRun);
+        $this->patchBootstrap($dryRun);
+        $this->publishConfig($dryRun);
+        $this->publishInertiaPage($dryRun);
+        $this->patchHostBuildFiles($dryRun);
+        $this->configureFrontend($localDsn, $dryRun);
+        $this->installEmbeddedMcp($project, $dryRun);
+        $this->emitAuthSnippet();
+        $this->emitEmbeddedNextSteps($localDsn);
+        $this->emitClosing($dryRun);
+
+        return self::SUCCESS;
+    }
+
+    private function publishConfig(bool $dryRun): void
+    {
+        if ($dryRun) {
+            $this->line('Would publish: config/watchtower.php');
+
+            return;
+        }
+
+        $this->call('vendor:publish', ['--tag' => 'watchtower-config', '--force' => true]);
+    }
+
+    private function emitClosing(bool $dryRun): void
+    {
+        if ($dryRun) {
+            $this->info('--dry-run: no files were modified.');
+
+            return;
+        }
+
+        $this->info('Verify with: php artisan watchtower:test');
+    }
+
+    private function writeModeEnv(string $mode, bool $dryRun): void
+    {
+        if ($dryRun) {
+            $this->line("Would set in .env: WATCHTOWER_MODE={$mode}");
+
+            return;
+        }
+
+        new EnvWriter(base_path('.env'))->set('WATCHTOWER_MODE', $mode);
+
+        if (is_file(base_path('.env.example'))) {
+            new EnvWriter(base_path('.env.example'))->set('WATCHTOWER_MODE', $mode);
+        }
+
+        $this->info("Wrote WATCHTOWER_MODE={$mode} to .env");
+    }
+
+    private function migrate(bool $dryRun): void
+    {
+        if ($dryRun) {
+            $this->line('Would run: php artisan migrate --force (creates the watchtower_* tables)');
+
+            return;
+        }
+
+        $this->call('migrate', [
+            '--force' => true,
+            '--realpath' => true,
+            '--path' => dirname(__DIR__, 2).'/database/migrations',
+        ]);
+
+        $this->call('migrate', ['--force' => true]);
+    }
+
+    /**
+     * The first project is this app itself. A second run finds it and leaves
+     * both the row and its key alone.
+     */
+    private function ensureFirstProject(bool $dryRun): ?Project
+    {
+        $name = (string) config('app.name', 'Watchtower');
+
+        if ($dryRun) {
+            $this->line("Would create the first watchtower_projects row: {$name} (platform laravel) — unless one already exists.");
+
+            return null;
+        }
+
+        $existing = Project::query()->orderBy('id')->first();
+
+        if ($existing !== null) {
+            $this->line("Project [{$existing->name}] already exists — reusing it.");
+
+            return $existing;
+        }
+
+        $project = Project::create([
+            'name' => $name,
+            'slug' => $this->uniqueSlug($name),
+            'platform' => 'laravel',
+            'public_key' => Project::newPublicKey(),
+            'is_active' => true,
+        ]);
+
+        $this->info("Created project [{$project->name}] (id {$project->getKey()}).");
+
+        return $project;
+    }
+
+    private function uniqueSlug(string $name): string
+    {
+        $base = Str::slug($name);
+        $base = $base === '' ? 'project' : $base;
+        $slug = $base;
+
+        while (Project::query()->where('slug', $slug)->exists()) {
+            $slug = $base.'-'.Str::lower(Str::random(6));
+        }
+
+        return $slug;
+    }
+
+    private function localDsn(?Project $project): string
+    {
+        $appUrl = (string) config('app.url', 'http://localhost');
+
+        if ($project !== null) {
+            return $project->buildDsn($appUrl);
+        }
+
+        $prefix = trim((string) config('watchtower.server.path', 'watchtower'), '/');
+
+        return rtrim($appUrl, '/').'/'.$prefix.'/{project-id}';
+    }
+
+    private function writeLocalSentryDsn(string $dsn, bool $dryRun): void
+    {
+        if ($dryRun) {
+            $this->line('Would set in .env: SENTRY_LARAVEL_DSN=<local project DSN>');
+
+            return;
+        }
+
+        new EnvWriter(base_path('.env'))->set('SENTRY_LARAVEL_DSN', $dsn);
+
+        $this->info('Wrote SENTRY_LARAVEL_DSN to .env');
+        $this->line('  '.$dsn);
+    }
+
+    private function publishInertiaPage(bool $dryRun): void
+    {
+        $extension = EmbeddedUiPatcher::pageExtension(base_path());
+
+        if ($dryRun) {
+            $this->line("Would publish: resources/js/pages/Watchtower.{$extension}");
+
+            return;
+        }
+
+        $target = resource_path("js/pages/Watchtower.{$extension}");
+
+        if (is_file($target)) {
+            $this->line('  resources/js/pages/Watchtower.'.$extension.' already published.');
+
+            return;
+        }
+
+        @mkdir(dirname($target), 0755, true);
+        copy(dirname(__DIR__, 2).'/resources/js/pages/Watchtower.jsx', $target);
+
+        $this->line('  Published resources/js/pages/Watchtower.'.$extension.'.');
+    }
+
+    /**
+     * The two build-tool edits the embedded UI cannot work around: the
+     * `@watchtower` Vite alias and Tailwind's `prefix(tw)` + `@source` lines.
+     */
+    private function patchHostBuildFiles(bool $dryRun): void
+    {
+        $viteConfigs = EmbeddedUiPatcher::viteConfigPaths(base_path());
+
+        if ($dryRun) {
+            $this->line('Would add the @watchtower Vite alias and write resources/css/watchtower.css.');
+
+            return;
+        }
+
+        foreach ($viteConfigs as $config) {
+            $already = EmbeddedUiPatcher::hasAlias($config);
+            $patched = EmbeddedUiPatcher::patchViteAlias($config);
+
+            $this->line(match (true) {
+                $already => '  '.basename($config).' already declares the @watchtower alias.',
+                $patched => '  Added the @watchtower alias to '.basename($config).'.',
+                default => '  Could not patch '.basename($config).' — add a resolve.alias entry for @watchtower manually.',
+            });
+        }
+
+        if ($viteConfigs === []) {
+            $this->warn('No vite.config.js/ts found — add the @watchtower alias once you have one.');
+        }
+
+        $this->writeWatchtowerCss();
+    }
+
+    private function writeWatchtowerCss(): void
+    {
+        $path = EmbeddedUiPatcher::cssFilePath(base_path());
+        $existed = EmbeddedUiPatcher::hasTailwindPrefix($path) && EmbeddedUiPatcher::hasTailwindSource($path);
+
+        if (! EmbeddedUiPatcher::writeCssFile(base_path())) {
+            $this->warn('Could not write resources/css/watchtower.css — create it manually with:');
+            $this->line(EmbeddedUiPatcher::cssContents());
+
+            return;
+        }
+
+        $this->line($existed
+            ? '  resources/css/watchtower.css already present.'
+            : '  Wrote resources/css/watchtower.css (imported by the published page stub).');
+    }
+
+    private function emitAuthSnippet(): void
+    {
+        $this->output->writeln('', OutputInterface::OUTPUT_RAW);
+        $this->output->writeln('Grant access to the embedded UI from a service provider (skipped entirely in the local environment):', OutputInterface::OUTPUT_RAW);
+        $this->writeRawSnippet(<<<'PHP'
+            use Illuminate\Support\Facades\Gate;
+            use Phattarachai\WatchtowerLaravel\Watchtower;
+
+            Watchtower::auth(fn ($request): bool => $request->user()?->isAdmin() === true);
+
+            // …or define the gate instead:
+            Gate::define('viewWatchtower', fn ($user): bool => $user->isAdmin());
+            PHP);
+    }
+
+    private function emitEmbeddedNextSteps(string $dsn): void
+    {
+        $prefix = trim((string) config('watchtower.server.path', 'watchtower'), '/');
+
+        $this->output->writeln('Next steps:', OutputInterface::OUTPUT_RAW);
+        $this->output->writeln('  1. npm run build (or npm run dev)', OutputInterface::OUTPUT_RAW);
+        $this->output->writeln('  2. Visit /'.$prefix, OutputInterface::OUTPUT_RAW);
+        $this->output->writeln('  3. php artisan watchtower:doctor to confirm the wiring', OutputInterface::OUTPUT_RAW);
+        $this->output->writeln('  Project DSN: '.$dsn, OutputInterface::OUTPUT_RAW);
+        $this->output->writeln('', OutputInterface::OUTPUT_RAW);
+    }
+
+    private function installEmbeddedMcp(?Project $project, bool $dryRun): void
+    {
+        if ((bool) $this->option('no-mcp')) {
+            return;
+        }
+
+        $prefix = trim((string) config('watchtower.server.path', 'watchtower'), '/');
+        $url = rtrim((string) config('app.url', 'http://localhost'), '/').'/'.$prefix.'/mcp';
+        $key = $project->public_key ?? '{project-public-key}';
+
+        $this->registerMcp($url, $key, $dryRun);
     }
 
     private function installMcp(string $dsn, bool $dryRun): void
@@ -80,8 +394,15 @@ class InstallCommand extends Command
             return;
         }
 
-        $url = sprintf('%s://%s/mcp', $parsed['scheme'], $parsed['host_with_port']);
-        $publicKey = $parsed['public_key'];
+        $this->registerMcp(
+            sprintf('%s://%s/mcp', $parsed['scheme'], $parsed['host_with_port']),
+            $parsed['public_key'],
+            $dryRun,
+        );
+    }
+
+    private function registerMcp(string $url, string $publicKey, bool $dryRun): void
+    {
         $manualCommand = sprintf('claude mcp add --transport http --scope project watchtower %s --header "Authorization: Bearer %s"', $url, $publicKey);
         $registrar = app(ClaudeMcpRegistrar::class);
         $binary = $registrar->find();
