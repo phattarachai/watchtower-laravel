@@ -211,19 +211,27 @@ class ProcessEventJob implements ShouldQueue
     }
 
     /**
+     * The SDK sends `timestamp` as either an epoch float or an offset-carrying
+     * ISO-8601 string. `received_at` is a naive `timestamp` column, so both forms
+     * are normalised onto the host app's own timezone before storing — otherwise
+     * the stored wall clock sits `app.timezone`'s offset away from `now()` and the
+     * UI reads "just now" as e.g. "7h ago". Carbon's `createFromTimestamp()` pins
+     * to UTC unless the zone is named, so it is passed explicitly.
+     *
      * @param  array<string, mixed>  $event
      */
     private function resolveReceivedAt(array $event): Carbon
     {
         $timestamp = $event['timestamp'] ?? null;
+        $timezone = (string) config('app.timezone');
 
         if (is_numeric($timestamp)) {
-            return Carbon::createFromTimestamp((float) $timestamp);
+            return Carbon::createFromTimestamp((float) $timestamp, $timezone);
         }
 
         if (is_string($timestamp) && $timestamp !== '') {
             try {
-                return Carbon::parse($timestamp);
+                return Carbon::parse($timestamp)->setTimezone($timezone);
             } catch (Throwable) {
                 return Carbon::now();
             }

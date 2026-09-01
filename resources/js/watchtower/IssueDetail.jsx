@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 
 import { BUTTON, BUTTON_ACCENT, CARD, Chip, LevelBadge, StatusPill } from './badges'
-import { ChevronIcon } from './icons'
+import { CheckIcon, ChevronIcon, CopyIcon } from './icons'
 import {
+  copyText,
   cx,
   firstError,
   flattenPairs,
@@ -31,7 +32,7 @@ const ACTIONS = [
   { status: 'snoozed', label: 'Snooze 24h', snoozeMinutes: 1440 },
 ]
 
-export function IssueDetail({ issue, event, events, navigation, endpoints, csrfToken }) {
+export function IssueDetail({ issue, event, events, navigation, endpoints, csrfToken, markdown }) {
   const [current, setCurrent] = useState(issue)
   const [tab, setTab] = useState('stacktrace')
   const [busy, setBusy] = useState(false)
@@ -66,6 +67,7 @@ export function IssueDetail({ issue, event, events, navigation, endpoints, csrfT
         error={error}
         backHref={endpoints.issues}
         onAction={changeStatus}
+        markdown={markdown}
       />
 
       <div className="tw:grid tw:gap-4 tw:lg:grid-cols-[minmax(0,1fr)_260px]">
@@ -100,7 +102,7 @@ export function IssueDetail({ issue, event, events, navigation, endpoints, csrfT
   )
 }
 
-function Header({ issue, busy, error, backHref, onAction }) {
+function Header({ issue, busy, error, backHref, onAction, markdown }) {
   return (
     <div className={cx(CARD, 'tw:p-4')}>
       <a href={backHref} className="tw:text-[11px] tw:text-[var(--wt-text-muted)] tw:hover:underline">
@@ -130,6 +132,7 @@ function Header({ issue, busy, error, backHref, onAction }) {
         </div>
 
         <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-2">
+          <CopyMarkdownButton markdown={markdown} />
           {ACTIONS.map((action) => (
             <button
               key={action.status}
@@ -146,6 +149,26 @@ function Header({ issue, busy, error, backHref, onAction }) {
 
       {error && <p className="tw:mt-2 tw:text-xs tw:text-[var(--wt-level-error)]">{error}</p>}
     </div>
+  )
+}
+
+function CopyMarkdownButton({ markdown }) {
+  const [copied, setCopied] = useState(false)
+
+  if (!markdown) {
+    return null
+  }
+
+  const copy = async () => {
+    const ok = await copyText(markdown)
+    setCopied(ok)
+  }
+
+  return (
+    <button type="button" className={BUTTON} onClick={copy}>
+      {copied ? <CheckIcon className="tw:h-3.5 tw:w-3.5" /> : <CopyIcon className="tw:h-3.5 tw:w-3.5" />}
+      {copied ? 'Copied' : 'Copy Markdown'}
+    </button>
   )
 }
 

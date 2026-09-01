@@ -38,6 +38,39 @@ it('renders the latest event in full, with the recent-event list and navigation'
             ->where('navigation.total', 2));
 });
 
+it('inlines the current event as a copyable Claude markdown prompt', function (): void {
+    $project = makeWatchtowerProject();
+    $group = makeWatchtowerGroup($project);
+    makeWatchtowerEvent($group, ['received_at' => now()]);
+
+    actingAs(wtUser())
+        ->get(route('watchtower.ui.issue', ['group' => $group->getKey()]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('markdown', fn (string $markdown): bool => str_contains($markdown, "project \"{$project->slug}\", issue #{$group->getKey()}")
+                && str_contains($markdown, '# RuntimeException')
+                && str_contains($markdown, 'Something exploded')
+                && str_contains($markdown, '## Stack Trace')
+                && str_contains($markdown, '1. app/Http/Controllers/HomeController.php:42')
+                && str_contains($markdown, '… +1 vendor frame')
+                && str_contains($markdown, '## Culprit — app/Http/Controllers/HomeController.php:42')
+                && str_contains($markdown, '- Where: POST /checkout'))
+            ->etc());
+});
+
+it('falls back to an MCP-fetch prompt when the issue has no stored events', function (): void {
+    $project = makeWatchtowerProject();
+    $group = makeWatchtowerGroup($project);
+
+    actingAs(wtUser())
+        ->get(route('watchtower.ui.issue', ['group' => $group->getKey()]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('markdown', fn (string $markdown): bool => str_contains($markdown, "Help me fix Watchtower issue #{$group->getKey()}")
+                && str_contains($markdown, "get_issue(issue_id={$group->getKey()})"))
+            ->etc());
+});
+
 it('opens a specific event through ?event= and walks back to the newer one', function (): void {
     $project = makeWatchtowerProject();
     $group = makeWatchtowerGroup($project);

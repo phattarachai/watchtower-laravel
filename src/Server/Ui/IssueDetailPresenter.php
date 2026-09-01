@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Phattarachai\WatchtowerLaravel\Server\Models\Event;
 use Phattarachai\WatchtowerLaravel\Server\Models\IssueGroup;
+use Phattarachai\WatchtowerLaravel\Server\Support\ClaudeIssuePrompt;
+use Phattarachai\WatchtowerLaravel\Server\Support\EventOrigin;
 
 final class IssueDetailPresenter
 {
@@ -25,7 +27,23 @@ final class IssueDetailPresenter
             'event' => $event === null ? null : self::event($event),
             'events' => self::recentEvents($group),
             'navigation' => $event === null ? self::emptyNavigation() : self::navigation($group, $event),
+            'markdown' => self::markdown($request, $group, $event),
         ];
+    }
+
+    /**
+     * The self-contained Claude prompt copied by the "Copy Markdown" button. The
+     * permalink is the canonical issue URL (query string dropped) so it points at
+     * the issue rather than the currently-selected event.
+     */
+    private static function markdown(Request $request, IssueGroup $group, ?Event $event): string
+    {
+        return (new ClaudeIssuePrompt(new EventOrigin))->build(
+            $group->project,
+            $group,
+            $event,
+            $request->url(),
+        );
     }
 
     /**
