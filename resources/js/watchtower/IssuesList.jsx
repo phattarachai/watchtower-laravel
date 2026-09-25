@@ -1,8 +1,8 @@
 import { useState } from 'react'
 
-import { CARD, INPUT, LevelBadge, StatusPill } from './badges'
-import { SearchIcon } from './icons'
-import { cx, formatDateTime, relativeTime, withId, withQuery } from './lib'
+import { BUTTON, BUTTON_ACCENT, CARD, INPUT, LevelBadge, StatusPill } from './badges'
+import { CheckIcon, ChevronIcon, SearchIcon, TrashIcon } from './icons'
+import { cx, firstError, formatDateTime, relativeTime, sendJson, withId, withQuery } from './lib'
 
 const STATUS_TABS = [
   { key: '', label: 'All', count: 'all' },
@@ -14,14 +14,59 @@ const STATUS_TABS = [
 
 const LEVELS = ['debug', 'info', 'warning', 'error', 'fatal']
 
+const SNOOZE_OPTIONS = [
+  { minutes: 60, label: '1 hour' },
+  { minutes: 1440, label: '24 hours' },
+  { minutes: 10080, label: '7 days' },
+  { minutes: 43200, label: '30 days' },
+]
+
+const CHECKBOX = 'tw:h-3.5 tw:w-3.5 tw:cursor-pointer tw:accent-[var(--wt-accent)]'
+
 /**
  * The issue inbox: filter bar, one row per group, server-side pagination.
  * Filtering is a full navigation so the URL always describes what is on screen.
  */
-export function IssuesList({ issues, filters, projects, environments, counts, endpoints }) {
+export function IssuesList({ issues, filters, projects, environments, counts, endpoints, csrfToken }) {
   const rows = issues?.data ?? []
   const meta = issues?.meta ?? {}
   const [query, setQuery] = useState(filters?.q ?? '')
+  const [selected, setSelected] = useState(() => new Set())
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  const toggle = (id) => {
+    setSelected((current) => {
+      const next = new Set(current)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const toggleAll = () => {
+    setSelected(selected.size === rows.length ? new Set() : new Set(rows.map((issue) => issue.id)))
+  }
+
+  const runBulk = async (url, method, body) => {
+    setBusy(true)
+    setError(null)
+    const response = await sendJson(url, method, csrfToken, { ids: [...selected], ...body })
+    if (response.ok) {
+      window.location.reload()
+      return
+    }
+    setBusy(false)
+    setError(firstError(response.data))
+  }
+
+  const bulkStatus = (status, snoozeMinutes) =>
+    runBulk(endpoints.issueBulkStatus, 'PATCH', { status, snooze_minutes: snoozeMinutes ?? null })
+
+  const bulkDelete = () => {
+    if (window.confirm(`Delete ${selected.size} issue(s) and all their events? This cannot be undone.`)) {
+      runBulk(endpoints.issueBulkDestroy, 'DELETE')
+    }
+  }
 
   const go = (changes) => {
     window.location.assign(withQuery(endpoints.issues, { ...filters, page: null, ...changes }))
@@ -74,11 +119,28 @@ export function IssuesList({ issues, filters, projects, environments, counts, en
             No issues match these filters.
           </p>
         ) : (
-          <ul className="tw:divide-y tw:divide-[var(--wt-border)]">
-            {rows.map((issue) => (
-              <IssueRow key={issue.id} issue={issue} href={withId(endpoints.issue, issue.id)} />
-            ))}
-          </ul>
+          <>
+            <BulkBar
+              total={rows.length}
+              count={selected.size}
+              busy={busy}
+              error={error}
+              onToggleAll={toggleAll}
+              onStatus={bulkStatus}
+              onDelete={bulkDelete}
+            />
+            <ul className="tw:divide-y tw:divide-[var(--wt-border)]">
+              {rows.map((issue) => (
+                <IssueRow
+                  key={issue.id}
+                  issue={issue}
+                  href={withId(endpoints.issue, issue.id)}
+                  checked={selected.has(issue.id)}
+                  onToggle={() => toggle(issue.id)}
+                />
+              ))}
+            </ul>
+          </>
         )}
       </div>
 
@@ -110,12 +172,102 @@ function StatusTabs({ counts, active, onSelect }) {
   )
 }
 
-function IssueRow({ issue, href }) {
+function BulkBar({ total, count, busy, error, onToggleAll, onStatus, onDelete }) {
+  const allChecked = count > 0 && count === total
+
   return (
-    <li>
+    <div className="tw:flex tw:min-h-11 tw:flex-wrap tw:items-center tw:gap-3 tw:border-b tw:border-[var(--wt-border)] tw:bg-[var(--wt-toolbar)] tw:px-4 tw:py-2">
+      <input
+        type="checkbox"
+        aria-label="Select all issues on this page"
+        className={CHECKBOX}
+        checked={allChecked}
+        ref={(input) => {
+          if (input) {
+            input.indeterminate = count > 0 && !allChecked
+          }
+        }}
+        onChange={onToggleAll}
+      />
+
+      {count === 0 ? (
+        <span className="tw:text-[11px] tw:text-[var(--wt-text-faint)]">Select issues to resolve, ignore, snooze or delete</span>
+      ) : (
+        <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-2">
+          <span className="tw:text-xs tw:font-medium tw:text-[var(--wt-text)]">{count} selected</span>
+          <button type="button" disabled={busy} onClick={() => onStatus('resolved')} className={BUTTON_ACCENT}>
+            <CheckIcon className="tw:h-3.5 tw:w-3.5" />
+            Resolve
+          </button>
+          <button type="button" disabled={busy} onClick={() => onStatus('unresolved')} className={BUTTON}>
+            Unresolve
+          </button>
+          <button type="button" disabled={busy} onClick={() => onStatus('ignored')} className={BUTTON}>
+            Ignore
+          </button>
+          <SnoozeMenu disabled={busy} onSnooze={(minutes) => onStatus('snoozed', minutes)} />
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onDelete}
+            className={cx(BUTTON, 'tw:text-[var(--wt-level-error)]')}
+          >
+            <TrashIcon className="tw:h-3.5 tw:w-3.5" />
+            Delete
+          </button>
+        </div>
+      )}
+
+      {error && <span className="tw:text-[11px] tw:text-[var(--wt-level-error)]">{error}</span>}
+    </div>
+  )
+}
+
+function SnoozeMenu({ disabled, onSnooze }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="tw:relative">
+      <button type="button" disabled={disabled} onClick={() => setOpen(!open)} className={BUTTON}>
+        Snooze
+        <ChevronIcon className="tw:h-3 tw:w-3 tw:rotate-90" />
+      </button>
+      {open && (
+        <div className="tw:absolute tw:left-0 tw:z-10 tw:mt-1 tw:min-w-32 tw:overflow-hidden tw:rounded-md tw:border tw:border-[var(--wt-border)] tw:bg-[var(--wt-raised)] tw:shadow-lg">
+          {SNOOZE_OPTIONS.map((option) => (
+            <button
+              key={option.minutes}
+              type="button"
+              onClick={() => {
+                setOpen(false)
+                onSnooze(option.minutes)
+              }}
+              className="tw:block tw:w-full tw:px-3 tw:py-1.5 tw:text-left tw:text-xs tw:text-[var(--wt-text)] tw:hover:bg-[var(--wt-hover)]"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function IssueRow({ issue, href, checked, onToggle }) {
+  return (
+    <li className={cx('tw:flex tw:items-center', checked && 'tw:bg-[var(--wt-accent-soft)]')}>
+      <label className="tw:flex tw:cursor-pointer tw:self-stretch tw:items-center tw:pl-4">
+        <input
+          type="checkbox"
+          aria-label={`Select ${issue.title}`}
+          className={CHECKBOX}
+          checked={checked}
+          onChange={onToggle}
+        />
+      </label>
       <a
         href={href}
-        className="tw:flex tw:items-center tw:gap-3 tw:px-4 tw:py-3 tw:hover:bg-[var(--wt-hover)]"
+        className="tw:flex tw:min-w-0 tw:flex-1 tw:items-center tw:gap-3 tw:px-4 tw:py-3 tw:hover:bg-[var(--wt-hover)]"
       >
         <div className="tw:min-w-0 tw:flex-1">
           <div className="tw:flex tw:items-center tw:gap-2">

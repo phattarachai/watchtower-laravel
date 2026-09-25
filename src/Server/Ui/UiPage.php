@@ -44,6 +44,8 @@ final class UiPage
             'issues' => route('watchtower.ui.issues'),
             'issue' => route('watchtower.ui.issue', ['group' => $id]),
             'issueStatus' => route('watchtower.ui.issues.status', ['group' => $id]),
+            'issueBulkStatus' => route('watchtower.ui.issues.bulk-status'),
+            'issueBulkDestroy' => route('watchtower.ui.issues.bulk-destroy'),
             'alerts' => route('watchtower.ui.alerts'),
             'alertStore' => route('watchtower.ui.alerts.store'),
             'alertUpdate' => route('watchtower.ui.alerts.update', ['rule' => $id]),
