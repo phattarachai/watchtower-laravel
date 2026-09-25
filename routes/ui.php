@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
 use Phattarachai\WatchtowerLaravel\Server\Http\Controllers\AlertRuleController;
+use Phattarachai\WatchtowerLaravel\Server\Http\Controllers\BulkIssueController;
 use Phattarachai\WatchtowerLaravel\Server\Http\Controllers\IssueStatusController;
 use Phattarachai\WatchtowerLaravel\Server\Http\Controllers\UiController;
 use Phattarachai\WatchtowerLaravel\Server\Http\Controllers\UiProjectController;
@@ -13,6 +14,8 @@ Route::get('/alerts', [UiController::class, 'alerts'])->name('alerts');
 Route::get('/settings', [UiController::class, 'settings'])->name('settings');
 Route::get('/issues/{group}', [UiController::class, 'issue'])->name('issue');
 
+Route::patch('/issues/status', [BulkIssueController::class, 'status'])->name('issues.bulk-status');
+Route::delete('/issues', [BulkIssueController::class, 'destroy'])->name('issues.bulk-destroy');
 Route::patch('/issues/{group}/status', IssueStatusController::class)->name('issues.status');
 
 Route::post('/alerts', [AlertRuleController::class, 'store'])->name('alerts.store');

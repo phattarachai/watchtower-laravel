@@ -54,6 +54,16 @@ class IssueGroup extends WatchtowerModel
         return $this->hasMany(IssueUser::class, 'group_id');
     }
 
+    public function changeStatus(string $status, ?int $snoozeMinutes = null): void
+    {
+        $this->forceFill([
+            'status' => $status,
+            'snoozed_until' => $status === self::STATUS_SNOOZED ? now()->addMinutes($snoozeMinutes ?? 60) : null,
+            'resolved_in_release' => $status === self::STATUS_RESOLVED ? $this->resolved_in_release : null,
+            'last_status_change_at' => now(),
+        ])->save();
+    }
+
     protected function casts(): array
     {
         return [

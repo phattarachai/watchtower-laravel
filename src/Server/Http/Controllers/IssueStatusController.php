@@ -18,24 +18,8 @@ final class IssueStatusController extends Controller
 
         abort_if($projectId !== null && (int) $projectId !== (int) $group->project_id, 404);
 
-        $status = (string) $request->validated('status');
-
-        $group->forceFill([
-            'status' => $status,
-            'snoozed_until' => $this->snoozedUntil($status, $request->validated('snooze_minutes')),
-            'resolved_in_release' => $status === IssueGroup::STATUS_RESOLVED ? $group->resolved_in_release : null,
-            'last_status_change_at' => now(),
-        ])->save();
+        $group->changeStatus((string) $request->validated('status'), $request->snoozeMinutes());
 
         return response()->json(['issue' => IssueListPresenter::row($group->refresh()->load('project'))]);
-    }
-
-    private function snoozedUntil(string $status, mixed $minutes): ?string
-    {
-        if ($status !== IssueGroup::STATUS_SNOOZED) {
-            return null;
-        }
-
-        return now()->addMinutes(is_numeric($minutes) ? (int) $minutes : 60)->toDateTimeString();
     }
 }

@@ -41,6 +41,14 @@ it('keeps every write endpoint behind the gate', function (): void {
         ->assertForbidden();
 
     actingAs(wtUser())
+        ->patchJson(route('watchtower.ui.issues.bulk-status'), ['ids' => [$group->getKey()], 'status' => 'resolved'])
+        ->assertForbidden();
+
+    actingAs(wtUser())
+        ->deleteJson(route('watchtower.ui.issues.bulk-destroy'), ['ids' => [$group->getKey()]])
+        ->assertForbidden();
+
+    actingAs(wtUser())
         ->postJson(route('watchtower.ui.projects.store'), ['name' => 'Nope', 'platform' => 'laravel'])
         ->assertForbidden();
 });

@@ -8,8 +8,10 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Phattarachai\WatchtowerLaravel\Server\Ui\IssueListPresenter;
 
-final class IssueStatusRequest extends FormRequest
+final class BulkIssueRequest extends FormRequest
 {
+    public const int MAX_IDS = 100;
+
     public function authorize(): bool
     {
         return true;
@@ -21,10 +23,19 @@ final class IssueStatusRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'status' => ['required', Rule::in(IssueListPresenter::statuses())],
+            'ids' => ['required', 'array', 'min:1', 'max:'.self::MAX_IDS],
+            'ids.*' => ['integer', 'min:1'],
+            'status' => [Rule::requiredIf($this->isMethod('PATCH')), Rule::in(IssueListPresenter::statuses())],
             'snooze_minutes' => ['nullable', 'integer', 'min:1', 'max:43200'],
-            'project_id' => ['nullable', 'integer'],
         ];
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function ids(): array
+    {
+        return array_values(array_unique(array_map(intval(...), (array) $this->validated('ids'))));
     }
 
     public function snoozeMinutes(): ?int
