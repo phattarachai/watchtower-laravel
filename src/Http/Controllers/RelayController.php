@@ -12,10 +12,11 @@ use Illuminate\Http\Response;
 use Phattarachai\WatchtowerLaravel\Jobs\ForwardEnvelope;
 use Phattarachai\WatchtowerLaravel\Server\EnvelopeAccepter;
 use Phattarachai\WatchtowerLaravel\Support\Dsn;
+use Phattarachai\WatchtowerLaravel\Watchtower;
 
 class RelayController
 {
-    public const VERSION = '0.1.0';
+    public const VERSION = Watchtower::VERSION;
 
     private const PASSTHROUGH_REQUEST_HEADERS = ['Content-Type', 'Content-Encoding'];
 
