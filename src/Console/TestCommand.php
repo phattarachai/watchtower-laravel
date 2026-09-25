@@ -11,6 +11,7 @@ use Phattarachai\WatchtowerLaravel\Support\Dsn;
 use Phattarachai\WatchtowerLaravel\Support\FrontendPatcher;
 use Phattarachai\WatchtowerLaravel\Support\LayoutDetector;
 use Phattarachai\WatchtowerLaravel\Support\ViteEntryDetector;
+use Phattarachai\WatchtowerLaravel\Watchtower;
 
 class TestCommand extends Command
 {
@@ -176,7 +177,7 @@ class TestCommand extends Command
             'event_id' => $eventId,
             'sent_at' => $sentAt,
             'dsn' => $dsn,
-            'sdk' => ['name' => 'watchtower.cli', 'version' => '0.1.0'],
+            'sdk' => ['name' => 'watchtower.cli', 'version' => Watchtower::VERSION],
         ], JSON_THROW_ON_ERROR);
 
         $event = json_encode([
