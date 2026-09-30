@@ -7,23 +7,27 @@ namespace Phattarachai\WatchtowerLaravel\Server\Jobs;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Phattarachai\WatchtowerCore\Ingest\EventNormalizer;
-use Phattarachai\WatchtowerCore\Ingest\EventScrubber;
-use Phattarachai\WatchtowerCore\Ingest\Fingerprinter;
-use Phattarachai\WatchtowerCore\Ingest\MessageNormalizer;
 use Phattarachai\WatchtowerLaravel\Server\Alerts\AlertDispatcher;
+use Phattarachai\WatchtowerLaravel\Server\Ingest\EventPipeline;
 use Phattarachai\WatchtowerLaravel\Server\Models\AlertRule;
 use Phattarachai\WatchtowerLaravel\Server\Models\Event;
 use Phattarachai\WatchtowerLaravel\Server\Models\IssueGroup;
 use Phattarachai\WatchtowerLaravel\Server\Models\IssueUser;
 use Throwable;
 
+/**
+ * Safe to run more than once for the same event: a retry, a job restored from
+ * a Redis snapshot, or two workers racing on one fingerprint all converge on a
+ * single event row and a single group. Failures of this job are never
+ * self-captured — see SelfCaptureGuard.
+ */
 class ProcessEventJob implements ShouldQueue
 {
     use Dispatchable;
@@ -31,9 +35,18 @@ class ProcessEventJob implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
+    /** Unique-violation retries inside one attempt: the group insert race. */
+    private const int PERSIST_ATTEMPTS = 3;
+
     public int $tries = 3;
 
     public int $timeout = 30;
+
+    /** A hung attempt fails outright instead of resurfacing as MaxAttemptsExceededException. */
+    public bool $failOnTimeout = true;
+
+    /** @var list<int> */
+    public array $backoff = [5, 30];
 
     /**
      * @param  array<string, mixed>  $rawEvent
@@ -49,26 +62,74 @@ class ProcessEventJob implements ShouldQueue
 
     public function handle(): void
     {
-        $fingerprinter = new Fingerprinter(new MessageNormalizer);
-        $event = $this->normalizer()->normalize($this->scrubber()->scrub($this->rawEvent));
-        $fingerprint = $fingerprinter->compute($event);
+        $pipeline = app(EventPipeline::class);
+        $event = $pipeline->prepare($this->rawEvent);
+        $eventId = $this->resolveEventId($event);
+
+        if ($this->alreadyStored($eventId)) {
+            return;
+        }
+
+        $result = $this->persist($pipeline, $event, $eventId);
+
+        if ($result !== null) {
+            $this->afterPersist($result);
+        }
+    }
+
+    /**
+     * A unique violation means another worker got there first: either with the
+     * same event (done — return null) or with the first event of a new group
+     * (retry, and the retry updates the group it created).
+     *
+     * @param  array<string, mixed>  $event
+     * @return array{group: IssueGroup, event: Event, is_new_group: bool, is_regression: bool}|null
+     */
+    private function persist(EventPipeline $pipeline, array $event, string $eventId): ?array
+    {
+        $fingerprint = $pipeline->fingerprint($event);
+        $title = $pipeline->title($event);
         $receivedAt = $this->resolveReceivedAt($event);
 
-        $result = $this->connection()->transaction(function () use ($event, $fingerprint, $receivedAt, $fingerprinter): array {
-            $upsert = $this->upsertGroup($event, $fingerprint, $receivedAt, $fingerprinter);
-            $group = $upsert['group'];
-            $eventModel = $this->insertEvent($group, $event, $receivedAt);
-            $this->trackUniqueUser($group, $event, $receivedAt);
+        for ($attempt = 1; ; $attempt++) {
+            try {
+                return $this->connection()->transaction(
+                    fn (): array => $this->write($event, $eventId, $fingerprint, $title, $receivedAt),
+                );
+            } catch (UniqueConstraintViolationException $e) {
+                if ($this->alreadyStored($eventId)) {
+                    return null;
+                }
 
-            return [
-                'group' => $group,
-                'event' => $eventModel,
-                'is_new_group' => $upsert['is_new_group'],
-                'is_regression' => $upsert['is_regression'],
-            ];
-        });
+                if ($attempt >= self::PERSIST_ATTEMPTS) {
+                    throw $e;
+                }
+            }
+        }
+    }
 
-        $this->afterPersist($result);
+    /**
+     * @param  array<string, mixed>  $event
+     * @return array{group: IssueGroup, event: Event, is_new_group: bool, is_regression: bool}
+     */
+    private function write(array $event, string $eventId, string $fingerprint, string $title, Carbon $receivedAt): array
+    {
+        $upsert = $this->upsertGroup($event, $fingerprint, $title, $receivedAt);
+        $group = $upsert['group'];
+        $eventModel = $this->insertEvent($group, $event, $eventId, $receivedAt);
+        $this->trackUniqueUser($group, $event, $receivedAt);
+
+        return [
+            'group' => $group,
+            'event' => $eventModel,
+            'is_new_group' => $upsert['is_new_group'],
+            'is_regression' => $upsert['is_regression'],
+        ];
+    }
+
+    private function alreadyStored(string $eventId): bool
+    {
+        return Event::query()->whereKey($eventId)->exists();
     }
 
     /**
@@ -102,42 +163,22 @@ class ProcessEventJob implements ShouldQueue
         return DB::connection(config('watchtower.server.connection'));
     }
 
-    private function scrubber(): EventScrubber
-    {
-        return new EventScrubber(
-            headerKeys: (array) config('watchtower.server.ingest.scrub.header_keys', []),
-            bodyKeys: (array) config('watchtower.server.ingest.scrub.body_keys', []),
-            placeholder: (string) config('watchtower.server.ingest.scrub.placeholder', '[Filtered]'),
-        );
-    }
-
-    private function normalizer(): EventNormalizer
-    {
-        return new EventNormalizer(
-            allowedEventFields: (array) config('watchtower.server.ingest.allowed_event_fields', []),
-            allowedContextKeys: (array) config('watchtower.server.ingest.allowed_context_keys', []),
-        );
-    }
-
     /**
      * @param  array<string, mixed>  $event
      * @return array{group: IssueGroup, is_new_group: bool, is_regression: bool}
      */
-    private function upsertGroup(
-        array $event,
-        string $fingerprint,
-        Carbon $receivedAt,
-        Fingerprinter $fingerprinter,
-    ): array {
-        $group = IssueGroup::firstOrNew([
-            'project_id' => $this->projectId,
-            'fingerprint' => $fingerprint,
-        ]);
+    private function upsertGroup(array $event, string $fingerprint, string $title, Carbon $receivedAt): array
+    {
+        $group = IssueGroup::query()
+            ->where('project_id', $this->projectId)
+            ->where('fingerprint', $fingerprint)
+            ->lockForUpdate()
+            ->first() ?? new IssueGroup(['project_id' => $this->projectId, 'fingerprint' => $fingerprint]);
 
         $isNew = ! $group->exists;
         $isRegression = ! $isNew && $this->isDormant($group);
 
-        $group->title = $fingerprinter->title($event);
+        $group->title = $title;
         $group->platform = isset($event['platform']) ? (string) $event['platform'] : $group->platform;
         $group->level = (string) ($event['level'] ?? 'error');
         $group->last_seen_at = $receivedAt;
@@ -173,10 +214,10 @@ class ProcessEventJob implements ShouldQueue
     /**
      * @param  array<string, mixed>  $event
      */
-    private function insertEvent(IssueGroup $group, array $event, Carbon $receivedAt): Event
+    private function insertEvent(IssueGroup $group, array $event, string $eventId, Carbon $receivedAt): Event
     {
         return Event::create([
-            'id' => $this->resolveEventId($event),
+            'id' => $eventId,
             'group_id' => $group->getKey(),
             'project_id' => $this->projectId,
             'environment' => isset($event['environment']) ? (string) $event['environment'] : null,

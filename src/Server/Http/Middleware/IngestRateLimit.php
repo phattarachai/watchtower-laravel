@@ -7,17 +7,18 @@ namespace Phattarachai\WatchtowerLaravel\Server\Http\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
+use Phattarachai\WatchtowerLaravel\Server\Ingest\IngestThrottle;
 use Phattarachai\WatchtowerLaravel\Server\Models\Project;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Per-project ingest throttle backed by the host app's cache store, so an
- * embedded install needs no Redis.
+ * Answers 429 before the body is parsed once the project's per-minute budget is
+ * spent, so the SDK backs off. The budget itself is spent per event by
+ * IngestThrottle, which every ingest path shares — including the ones that
+ * never pass through this middleware.
  */
 class IngestRateLimit
 {
-    private const int WINDOW_SECONDS = 60;
-
     public function handle(Request $request, Closure $next): Response
     {
         $project = $request->attributes->get('watchtower_project');
@@ -27,13 +28,11 @@ class IngestRateLimit
             return $next($request);
         }
 
-        $key = 'watchtower:ingest:'.$project->getKey();
+        $key = IngestThrottle::projectKey((int) $project->getKey());
 
         if (RateLimiter::tooManyAttempts($key, $limit)) {
             return $this->throttled(max(1, RateLimiter::availableIn($key)));
         }
-
-        RateLimiter::hit($key, self::WINDOW_SECONDS);
 
         $response = $next($request);
         $response->headers->set('X-Sentry-Rate-Limits-Remaining', (string) RateLimiter::remaining($key, $limit));

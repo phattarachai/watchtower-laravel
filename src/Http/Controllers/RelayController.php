@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Phattarachai\WatchtowerLaravel\Http\Controllers;
 
-use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -12,6 +11,7 @@ use Illuminate\Http\Response;
 use Phattarachai\WatchtowerLaravel\Jobs\ForwardEnvelope;
 use Phattarachai\WatchtowerLaravel\Server\EnvelopeAccepter;
 use Phattarachai\WatchtowerLaravel\Support\Dsn;
+use Phattarachai\WatchtowerLaravel\Support\EnvelopeForwarder;
 use Phattarachai\WatchtowerLaravel\Watchtower;
 
 class RelayController
@@ -93,17 +93,8 @@ class RelayController
      */
     protected function forwardSync(string $upstream, string $body, array $headers): Response|JsonResponse
     {
-        $client = app(Client::class);
-
         try {
-            $response = $client->post($upstream, [
-                'headers' => $headers,
-                'body' => $body,
-                'http_errors' => false,
-                'timeout' => (int) config('watchtower.relay.timeout', 5),
-                'connect_timeout' => (float) config('watchtower.forwarder.connect_timeout', 3),
-                'verify' => (bool) config('watchtower.forwarder.verify_ssl', true),
-            ]);
+            $response = app(EnvelopeForwarder::class)->forward($upstream, $body, $headers);
         } catch (GuzzleException $e) {
             return new JsonResponse([
                 'error' => 'upstream_unreachable',

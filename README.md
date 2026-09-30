@@ -91,6 +91,36 @@ in-process one that hands the serialized envelope straight to the ingest pipelin
 Set `WATCHTOWER_SELF_CAPTURE=loopback` to keep the SDK's HTTP transport (events travel over the network back into
 this app's ingest route), or `false` to disable self-capture entirely.
 
+Watchtower's own queue failures are never self-captured: anything a worker reports while running or failing a
+`ProcessEventJob` / `ForwardEnvelope` is dropped, so a failing job cannot re-queue itself as a new event.
+
+### Production
+
+Every ingest path — HTTP, the relay and self-capture — shares a per-project budget (`WATCHTOWER_RATE_LIMIT_PER_MIN`)
+and a per-issue one (`WATCHTOWER_RATE_LIMIT_PER_FINGERPRINT_PER_MIN`). Events over budget are counted on their issue
+but not queued. Each event is scrubbed and trimmed to `WATCHTOWER_MAX_EVENT_BYTES` (200 KB) before it is queued.
+
+On Redis + Horizon, run events on a dedicated queue. Add a supervisor first, then point Watchtower at it:
+
+```php
+// config/horizon.php → 'defaults' (and list it under each environment)
+'app-supervisor-watchtower' => [
+    'connection' => 'redis',
+    'queue' => ['watchtower'],
+    'maxProcesses' => 1,
+    'tries' => 3,
+    'timeout' => 60,
+],
+```
+
+```dotenv
+WATCHTOWER_QUEUE_NAME=watchtower
+```
+
+`watchtower:doctor` fails if no Horizon supervisor consumes that queue. Cap Redis too (`maxmemory 1gb`,
+`maxmemory-policy noeviction`) so a runaway fails writes instead of getting Redis OOM-killed. The bundled skill's
+`reference.md` has the full Horizon block and a triage runbook for a queue that is already flooded.
+
 ### MCP
 
 Install `laravel/mcp` and the server mounts at `/{prefix}/mcp`, authenticated with any active project's public key —
@@ -109,6 +139,13 @@ central server: `list_issues`, `get_issue`, `list_events`, `get_event`, `get_sta
 | `WATCHTOWER_RETENTION_DAYS`   | `90`                        | Event retention; a project row may override it.                  |
 | `WATCHTOWER_SELF_CAPTURE`     | `transport`                 | `transport`, `loopback` or `false`.                              |
 | `WATCHTOWER_MCP_ENABLED`      | `true`                      | Mount the embedded MCP server (needs `laravel/mcp`).             |
+| `WATCHTOWER_QUEUE_CONNECTION` | _(default connection)_      | Queue connection for `ProcessEventJob`.                          |
+| `WATCHTOWER_QUEUE_NAME`       | _(default queue)_           | Queue for `ProcessEventJob`. Recommended: `watchtower`.          |
+| `WATCHTOWER_RATE_LIMIT_PER_MIN` | `300`                     | Events per minute per project, on every ingest path.             |
+| `WATCHTOWER_RATE_LIMIT_PER_FINGERPRINT_PER_MIN` | `20`      | Events per minute per issue; the rest are counted, not stored.   |
+| `WATCHTOWER_MAX_PAYLOAD_BYTES` | `1048576`                  | Largest envelope body accepted, as sent.                         |
+| `WATCHTOWER_MAX_EVENT_BYTES`  | `200000`                    | Events are trimmed to this JSON size before being queued.        |
+| `WATCHTOWER_MAX_STRING_BYTES` | `8192`                      | Cap on any single string in an event.                            |
 | `WATCHTOWER_RELAY_ENABLED`    | `true`                      | Register the relay route on boot.                                |
 | `WATCHTOWER_RELAY_PATH`       | `/api/watchtower-relay`     | Relay endpoint path (must live under `/api/`).                   |
 | `WATCHTOWER_RELAY_TIMEOUT`    | `5`                         | Upstream request timeout (seconds).                              |
@@ -116,6 +153,7 @@ central server: `list_issues`, `get_issue`, `list_events`, `get_event`, `get_sta
 | `WATCHTOWER_RELAY_QUEUE`      | _(default queue)_           | Queue name when async is enabled.                                |
 | `WATCHTOWER_VERIFY_SSL`       | `true`                      | Verify upstream TLS certificate.                                 |
 | `WATCHTOWER_CONNECT_TIMEOUT`  | `3`                         | Guzzle connect timeout (seconds).                                |
+| `WATCHTOWER_FORWARD_GZIP`     | `true`                      | gzip uncompressed envelopes (≥ 1 KB) before forwarding upstream. |
 
 ## Browser side
 
@@ -152,7 +190,7 @@ Because the request hits your own origin under `/api/`, ad-blockers don't recogn
 
 ## Async forwarding
 
-Set `WATCHTOWER_RELAY_ASYNC=true` to dispatch each forward through a `ForwardEnvelope` job. The relay returns `202 {"queued": true}` immediately and the worker performs the upstream POST. Failures are logged but not retried beyond Guzzle's default behavior — the Sentry SDK retransmits anyway.
+Set `WATCHTOWER_RELAY_ASYNC=true` to dispatch each forward through a `ForwardEnvelope` job. The relay returns `202 {"queued": true}` immediately and the worker performs the upstream POST, reusing one HTTP connection across jobs. An unreachable upstream or a 5xx is retried twice with backoff; a 4xx (including 429) is dropped. After the last attempt the failure is logged and the job completes, so an outage never parks envelope bodies in `failed_jobs`.
 
 ## Verify
 

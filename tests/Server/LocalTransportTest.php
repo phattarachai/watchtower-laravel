@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Validation\ValidationException;
 use Phattarachai\WatchtowerLaravel\Sentry\BeforeSend;
+use Phattarachai\WatchtowerLaravel\Sentry\SelfCaptureGuard;
 use Phattarachai\WatchtowerLaravel\Server\EnvelopeAccepter;
 use Phattarachai\WatchtowerLaravel\Server\Models\Event;
 use Phattarachai\WatchtowerLaravel\Server\Models\IssueGroup;
@@ -26,6 +27,7 @@ function hubForProject(Project $project): Hub
     $builder->setTransport(new LocalTransport(
         new PayloadSerializer($builder->getOptions()),
         app(EnvelopeAccepter::class),
+        app(SelfCaptureGuard::class),
     ));
 
     return new Hub($builder->getClient());
@@ -86,6 +88,7 @@ it('still honours a BeforeSend drop', function (): void {
     $builder->setTransport(new LocalTransport(
         new PayloadSerializer($builder->getOptions()),
         app(EnvelopeAccepter::class),
+        app(SelfCaptureGuard::class),
     ));
 
     new Hub($builder->getClient())->captureException(ValidationException::withMessages(['x' => 'y']));

@@ -111,7 +111,7 @@ final class DoctorCommand extends Command
             : 'No active project. Create one with `php artisan watchtower:project create "My App"`.');
 
         $this->mailAdvisory();
-        $this->queueAdvisory();
+        $failures += $this->queueCheck();
         $this->mcpAdvisory();
 
         return $failures + $this->selfCaptureCheck();
@@ -151,17 +151,54 @@ final class DoctorCommand extends Command
         $this->advisory('Mail transport', "Alert emails go out over the [{$mailer}] mailer.");
     }
 
-    private function queueAdvisory(): void
+    /**
+     * A dedicated queue is only safe if something consumes it, so a named queue
+     * on a Horizon host is a real check: Horizon must have a supervisor for this
+     * environment listening on it, or events pile up unprocessed.
+     */
+    private function queueCheck(): int
     {
         $connection = (string) (config('watchtower.server.queue.connection') ?? config('queue.default', 'sync'));
+        $queue = (string) config('watchtower.server.queue.name');
 
         if ($connection === 'sync') {
             $this->advisory('Queue', 'Queue is [sync] — every event is normalized inline on the request that reported it.', warn: true);
 
-            return;
+            return 0;
         }
 
-        $this->advisory('Queue', "Events are processed on the [{$connection}] queue — keep a worker running.");
+        if ($queue === '') {
+            $this->advisory('Queue', "Events share the host's default queue on [{$connection}] — set WATCHTOWER_QUEUE_NAME=watchtower and give it its own worker or Horizon supervisor.", warn: true);
+
+            return 0;
+        }
+
+        if (config('horizon') === null) {
+            $this->advisory('Queue', "Events are processed on the [{$queue}] queue of [{$connection}] — keep a worker running with --queue={$queue}.");
+
+            return 0;
+        }
+
+        return $this->check("Horizon listens on [{$queue}]", fn (): ?string => $this->horizonListensOn($connection, $queue)
+            ? null
+            : 'No Horizon supervisor for the ['.app()->environment()."] environment consumes [{$connection}:{$queue}] — events would pile up unprocessed. Add a supervisor (see the Watchtower skill) or unset WATCHTOWER_QUEUE_NAME.");
+    }
+
+    private function horizonListensOn(string $connection, string $queue): bool
+    {
+        $environments = (array) config('horizon.environments', []);
+        $supervisors = (array) ($environments[app()->environment()] ?? $environments['*'] ?? []);
+
+        foreach ($supervisors as $name => $supervisor) {
+            $options = [...(array) config("horizon.defaults.{$name}", []), ...(array) $supervisor];
+            $queues = explode(',', implode(',', (array) ($options['queue'] ?? [])));
+
+            if (($options['connection'] ?? $connection) === $connection && in_array($queue, $queues, true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function mcpAdvisory(): void

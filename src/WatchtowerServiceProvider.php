@@ -18,12 +18,16 @@ use Phattarachai\WatchtowerLaravel\Console\PruneCommand;
 use Phattarachai\WatchtowerLaravel\Console\TestCommand;
 use Phattarachai\WatchtowerLaravel\Http\Middleware\WatchtowerUserContext;
 use Phattarachai\WatchtowerLaravel\Sentry\BeforeSend;
+use Phattarachai\WatchtowerLaravel\Sentry\SelfCaptureGuard;
 use Phattarachai\WatchtowerLaravel\Server\Alerts\EloquentEventCounter;
 use Phattarachai\WatchtowerLaravel\Server\Alerts\EloquentNotificationLog;
 use Phattarachai\WatchtowerLaravel\Server\EnvelopeAccepter;
 use Phattarachai\WatchtowerLaravel\Server\Http\Middleware\AuthorizeUi;
+use Phattarachai\WatchtowerLaravel\Server\Ingest\EventPipeline;
+use Phattarachai\WatchtowerLaravel\Server\Ingest\IngestThrottle;
 use Phattarachai\WatchtowerLaravel\Server\Mcp\McpRegistrar;
 use Phattarachai\WatchtowerLaravel\Server\Sentry\LocalTransport;
+use Phattarachai\WatchtowerLaravel\Support\EnvelopeForwarder;
 use Sentry\ClientBuilder;
 use Sentry\SentrySdk;
 use Sentry\Serializer\PayloadSerializer;
@@ -35,6 +39,10 @@ class WatchtowerServiceProvider extends ServiceProvider
         $this->mergeConfigFrom(__DIR__.'/../config/watchtower.php', 'watchtower');
 
         $this->app->singleton(BeforeSend::class);
+        $this->app->singleton(SelfCaptureGuard::class);
+        $this->app->singleton(EventPipeline::class);
+        $this->app->singleton(IngestThrottle::class);
+        $this->app->singleton(EnvelopeForwarder::class);
 
         $this->app->bind(EventCounter::class, EloquentEventCounter::class);
         $this->app->bind(NotificationLog::class, EloquentNotificationLog::class);
@@ -61,6 +69,7 @@ class WatchtowerServiceProvider extends ServiceProvider
             return $builder->setTransport(new LocalTransport(
                 new PayloadSerializer($builder->getOptions()),
                 $this->app->make(EnvelopeAccepter::class),
+                $this->app->make(SelfCaptureGuard::class),
             ));
         });
     }
@@ -103,6 +112,7 @@ class WatchtowerServiceProvider extends ServiceProvider
 
         $this->registerEmbeddedServer();
         $this->registerUserContextMiddleware();
+        $this->app->make(SelfCaptureGuard::class)->subscribe($this->app['events']);
         $this->registerBeforeSendChain();
 
         if ($this->app->runningInConsole()) {
@@ -165,16 +175,17 @@ class WatchtowerServiceProvider extends ServiceProvider
     }
 
     /**
-     * Chain our BeforeSend in front of whatever the user already configured in
+     * Chain our callbacks in front of whatever the user already configured in
      * config/sentry.php. Runs after the Sentry SDK provider has booted so the
      * client is built — we then mutate its Options in place.
+     *
+     * The self-capture guard runs first and is not switched off by
+     * `before_send.enabled`: it is what stops a failing Watchtower job from
+     * reporting itself back onto the queue (loopback mode goes through here;
+     * the in-process transport checks the guard again).
      */
     private function registerBeforeSendChain(): void
     {
-        if (config('watchtower.before_send.enabled') === false) {
-            return;
-        }
-
         $this->app->booted(function (): void {
             $client = SentrySdk::getCurrentHub()->getClient();
 
@@ -184,10 +195,15 @@ class WatchtowerServiceProvider extends ServiceProvider
 
             $options = $client->getOptions();
             $existing = $options->getBeforeSendCallback();
-            $ours = $this->app->make(BeforeSend::class);
+            $guard = $this->app->make(SelfCaptureGuard::class);
+            $ours = config('watchtower.before_send.enabled') === false ? null : $this->app->make(BeforeSend::class);
 
-            $options->setBeforeSendCallback(function ($event, $hint) use ($ours, $existing) {
-                $event = $ours($event, $hint);
+            $options->setBeforeSendCallback(function ($event, $hint) use ($guard, $ours, $existing) {
+                if ($guard->shouldDrop($hint?->exception)) {
+                    return null;
+                }
+
+                $event = $ours === null ? $event : $ours($event, $hint);
 
                 if ($event === null) {
                     return null;

@@ -1,7 +1,7 @@
 ---
 name: watchtower-error-tracking
 description: "Wire up Watchtower (a self-hosted, Sentry-compatible exception tracker) into a Laravel or browser app, and connect Claude Code to its MCP server for in-conversation issue triage. Triggers on \"Watchtower\", \"set up error tracking\", \"verify the exception was reported\", WATCHTOWER_DSN, SENTRY_LARAVEL_DSN, or VITE_SENTRY_DSN."
-version: 2026.08.30.1
+version: 2026.09.30.1
 ---
 
 # Watchtower error tracking
@@ -57,6 +57,29 @@ Watchtower::auth(fn ($request): bool => $request->user()?->isAdmin() === true);
 Host requirements: **Inertia + React** with an `import.meta.glob` over `resources/js/pages`, and a **Tailwind v4** entry stylesheet — the install adds `@import 'tailwindcss' prefix(tw);` and an `@source` line pointing into the package. Set `WATCHTOWER_UI_ENABLED=false` for a headless install (ingest + alerts + MCP, no console) if the host has neither. No Redis is needed; the `sync` queue works.
 
 Manage projects without the browser: `php artisan watchtower:project {list|create|rotate-key|activate|deactivate}`. `list` prints each project's key and DSN.
+
+### Running standalone in production
+
+On anything with a real queue (Redis + Horizon), do three things `watchtower:install` deliberately leaves to you:
+
+1. **Give Watchtower its own queue.** Add a Horizon supervisor for a `watchtower` queue, deploy it, *then* set `WATCHTOWER_QUEUE_NAME=watchtower` — in that order, because a queue nobody listens on silently piles up events. `watchtower:doctor` fails when Horizon has no supervisor for the queue in the current environment. The package default is still the host's `default` queue, so an upgrade never strands jobs.
+
+   ```php
+   // config/horizon.php — add to 'defaults', and list it under each environment
+   'app-supervisor-watchtower' => [
+       'connection' => 'redis',
+       'queue' => ['watchtower'],
+       'balance' => false,
+       'maxProcesses' => 1,
+       'tries' => 3,
+       'timeout' => 60,   // > ProcessEventJob's 30 s, < the connection's retry_after
+   ],
+   ```
+
+2. **Cap Redis.** `maxmemory 1gb` + `maxmemory-policy noeviction` in `redis.conf`. A full Redis then refuses writes — self-capture drops the event and the request carries on — instead of growing until the kernel OOM-kills it and every request 500s.
+
+3. **Know the self-capture loop.** Before 1.2.0 a failing `ProcessEventJob` was reported by the worker, captured into a *new* `ProcessEventJob`, and so on — each generation quoting the last one's payload in its SQL error (one incident: 7 GB queue, Redis OOM-killed 62 times). 1.2.0 drops Watchtower's own job failures from self-capture, rate-limits every ingest path, and caps each queued event at 200 KB. If Redis memory still balloons with `ProcessEventJob` payloads, follow the triage runbook in `reference.md` § "Self-capture loop".
+
 
 ### Pointing child apps at a standalone host
 

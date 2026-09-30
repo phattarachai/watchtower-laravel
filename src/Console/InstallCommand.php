@@ -365,6 +365,7 @@ class InstallCommand extends Command
         $this->output->writeln('  1. npm run build (or npm run dev)', OutputInterface::OUTPUT_RAW);
         $this->output->writeln('  2. Visit /'.$prefix, OutputInterface::OUTPUT_RAW);
         $this->output->writeln('  3. php artisan watchtower:doctor to confirm the wiring', OutputInterface::OUTPUT_RAW);
+        $this->output->writeln('  4. On a real queue: set WATCHTOWER_QUEUE_NAME=watchtower and add a worker/Horizon supervisor for it', OutputInterface::OUTPUT_RAW);
         $this->output->writeln('  Project DSN: '.$dsn, OutputInterface::OUTPUT_RAW);
         $this->output->writeln('', OutputInterface::OUTPUT_RAW);
     }
