@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Phattarachai\WatchtowerLaravel\Console;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Phattarachai\WatchtowerLaravel\Server\Mcp\McpRegistrar;
@@ -112,6 +113,7 @@ final class DoctorCommand extends Command
 
         $this->mailAdvisory();
         $failures += $this->queueCheck();
+        $this->redisMemoryAdvisory();
         $this->mcpAdvisory();
 
         return $failures + $this->selfCaptureCheck();
@@ -182,6 +184,53 @@ final class DoctorCommand extends Command
         return $this->check("Horizon listens on [{$queue}]", fn (): ?string => $this->horizonListensOn($connection, $queue)
             ? null
             : 'No Horizon supervisor for the ['.app()->environment()."] environment consumes [{$connection}:{$queue}] — events would pile up unprocessed. Add a supervisor (see the Watchtower skill) or unset WATCHTOWER_QUEUE_NAME.");
+    }
+
+    /**
+     * An unbounded Redis that holds the queue turns any runaway into an outage
+     * (OOM kill → every request 500s); an evicting one silently drops jobs.
+     */
+    private function redisMemoryAdvisory(): void
+    {
+        $connection = (string) (config('watchtower.server.queue.connection') ?? config('queue.default', 'sync'));
+
+        if (config("queue.connections.{$connection}.driver") !== 'redis') {
+            return;
+        }
+
+        try {
+            $info = $this->flatten((array) Redis::connection(config("queue.connections.{$connection}.connection") ?? 'default')->command('info', ['memory']));
+        } catch (Throwable) {
+            $this->advisory('Redis memory', 'Could not read INFO memory — make sure Redis has maxmemory set with maxmemory-policy noeviction.', warn: true);
+
+            return;
+        }
+
+        $max = (int) ($info['maxmemory'] ?? 0);
+        $policy = (string) ($info['maxmemory_policy'] ?? 'unknown');
+
+        match (true) {
+            $max === 0 => $this->advisory('Redis memory', 'maxmemory is unset — a queue runaway grows until the kernel OOM-kills Redis. Set maxmemory with maxmemory-policy noeviction.', warn: true),
+            $policy !== 'noeviction' => $this->advisory('Redis memory', "maxmemory-policy is [{$policy}] — Redis can evict queued jobs. Prefer noeviction on the queue instance.", warn: true),
+            default => $this->advisory('Redis memory', 'Capped at '.round($max / 1_048_576).' MB with noeviction.'),
+        };
+    }
+
+    /**
+     * phpredis returns INFO as a flat map; predis nests it under the section.
+     *
+     * @param  array<mixed>  $info
+     * @return array<string, mixed>
+     */
+    private function flatten(array $info): array
+    {
+        $flat = [];
+
+        foreach ($info as $key => $value) {
+            $flat = is_array($value) ? [...$flat, ...$this->flatten($value)] : [...$flat, (string) $key => $value];
+        }
+
+        return $flat;
     }
 
     private function horizonListensOn(string $connection, string $queue): bool

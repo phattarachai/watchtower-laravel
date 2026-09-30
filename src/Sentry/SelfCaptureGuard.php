@@ -14,6 +14,7 @@ use Illuminate\Queue\Events\Looping;
 use Illuminate\Queue\MaxAttemptsExceededException;
 use Phattarachai\WatchtowerLaravel\Jobs\ForwardEnvelope;
 use Phattarachai\WatchtowerLaravel\Server\Jobs\ProcessEventJob;
+use Phattarachai\WatchtowerLaravel\Server\Mail\IssueAlertMail;
 use Throwable;
 use WeakMap;
 
@@ -39,8 +40,13 @@ use WeakMap;
  */
 final class SelfCaptureGuard
 {
-    /** @var list<class-string> */
-    private const array JOBS = [ProcessEventJob::class, ForwardEnvelope::class];
+    /**
+     * Queued alert mail is on the list because a failing SMTP send would be
+     * captured, match an alert rule, and queue another mail to the same SMTP.
+     *
+     * @var list<class-string>
+     */
+    private const array JOBS = [ProcessEventJob::class, ForwardEnvelope::class, IssueAlertMail::class];
 
     private bool $inWatchtowerJob = false;
 
@@ -109,9 +115,9 @@ final class SelfCaptureGuard
             return false;
         }
 
-        $name = $job->payload()['data']['commandName'] ?? $job->resolveName();
+        $payload = $job->payload();
 
-        return in_array($name, self::JOBS, true);
+        return array_intersect([$payload['data']['commandName'] ?? null, $payload['displayName'] ?? null], self::JOBS) !== [];
     }
 
     /** Test seam: forget any worker scope left over from a previous job. */

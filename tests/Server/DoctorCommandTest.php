@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Redis;
 use Phattarachai\WatchtowerLaravel\Server\Models\Project;
 use Phattarachai\WatchtowerLaravel\Support\EmbeddedUiPatcher;
 use Sentry\Laravel\ServiceProvider as SentryServiceProvider;
@@ -176,4 +177,39 @@ it('passes when a Horizon supervisor consumes the Watchtower queue', function ()
     wireDoctorFixture();
 
     $this->artisan('watchtower:doctor')->assertSuccessful();
+});
+
+function fakeRedisInfo(array $info): void
+{
+    $connection = Mockery::mock();
+    $connection->shouldReceive('command')->with('info', ['memory'])->andReturn($info);
+    Redis::shouldReceive('connection')->andReturn($connection);
+}
+
+function doctorOnRedisQueue(): void
+{
+    config()->set('watchtower.server.self_capture', 'loopback');
+    config()->set('watchtower.server.queue.connection', 'redis');
+    wireDoctorFixture();
+}
+
+it('warns when the queue Redis has no maxmemory', function (): void {
+    doctorOnRedisQueue();
+    fakeRedisInfo(['maxmemory' => '0', 'maxmemory_policy' => 'noeviction']);
+
+    $this->artisan('watchtower:doctor')->expectsOutputToContain('maxmemory is unset')->assertSuccessful();
+});
+
+it('warns when the queue Redis evicts keys', function (): void {
+    doctorOnRedisQueue();
+    fakeRedisInfo(['Memory' => ['maxmemory' => '1073741824', 'maxmemory_policy' => 'allkeys-lru']]);
+
+    $this->artisan('watchtower:doctor')->expectsOutputToContain('maxmemory-policy is [allkeys-lru]')->assertSuccessful();
+});
+
+it('reports a capped, non-evicting queue Redis', function (): void {
+    doctorOnRedisQueue();
+    fakeRedisInfo(['maxmemory' => '1073741824', 'maxmemory_policy' => 'noeviction']);
+
+    $this->artisan('watchtower:doctor')->expectsOutputToContain('Capped at 1024 MB with noeviction')->assertSuccessful();
 });

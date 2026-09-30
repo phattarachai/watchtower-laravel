@@ -31,7 +31,10 @@ class IssueAlertMail extends Mailable implements ShouldQueue
         public readonly Project $project,
         public readonly bool $isRegression = false,
         public readonly bool $isTest = false,
-    ) {}
+    ) {
+        $this->onConnection(config('watchtower.server.queue.connection'));
+        $this->onQueue(config('watchtower.server.queue.name'));
+    }
 
     public function envelope(): Envelope
     {

@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace Phattarachai\WatchtowerLaravel\Server;
 
 use Illuminate\Http\Request;
+use Phattarachai\WatchtowerCore\Ingest\EventPipeline;
 use Phattarachai\WatchtowerCore\Sentry\EnvelopeItem;
 use Phattarachai\WatchtowerCore\Sentry\EnvelopeParser;
 use Phattarachai\WatchtowerCore\Support\DsnParser;
-use Phattarachai\WatchtowerLaravel\Server\Ingest\EventPipeline;
+use Phattarachai\WatchtowerCore\Support\Gzip;
 use Phattarachai\WatchtowerLaravel\Server\Ingest\IngestThrottle;
+use Phattarachai\WatchtowerLaravel\Server\Ingest\QueueBackpressure;
 use Phattarachai\WatchtowerLaravel\Server\Jobs\ProcessEventJob;
 use Phattarachai\WatchtowerLaravel\Server\Models\Project;
 
@@ -21,28 +23,20 @@ class EnvelopeAccepter
 {
     public function __construct(
         private readonly EnvelopeParser $parser,
-        private readonly EventPipeline $pipeline,
         private readonly IngestThrottle $throttle,
+        private readonly QueueBackpressure $backpressure,
     ) {}
 
     /**
      * IngestSizeLimit only sees the compressed body, so the inflated size is
      * capped here too — a 1 MB gzip body can otherwise expand to hundreds of MB.
-     * A body that would inflate past the cap parses as an empty envelope.
+     * A body that would inflate past the cap decodes to an empty envelope.
      */
     public function body(Request $request): string
     {
-        $body = $request->getContent();
-        $encoding = $request->header('Content-Encoding');
-
-        if (strtolower((string) $encoding) !== 'gzip') {
-            return $body;
-        }
-
         $cap = (int) config('watchtower.server.max_payload_bytes', 1_048_576) * 20;
-        $inflated = $cap > 0 ? @gzdecode($body, $cap) : false;
 
-        return $inflated === false ? $body : $inflated;
+        return Gzip::decodeBody($request->getContent(), $request->header('Content-Encoding'), $cap > 0 ? $cap : null);
     }
 
     /**
@@ -139,10 +133,11 @@ class EnvelopeAccepter
             return;
         }
 
-        $event = $this->pipeline->prepare($item->payload);
-        $fingerprint = $this->pipeline->fingerprint($event);
+        $pipeline = app(EventPipeline::class);
+        $event = $pipeline->prepare($item->payload);
+        $fingerprint = $pipeline->fingerprint($event);
 
-        if (! $this->throttle->admit($projectId, $fingerprint)) {
+        if ($this->backpressure->saturated() || ! $this->throttle->admit($projectId, $fingerprint)) {
             $this->throttle->countDropped($projectId, $fingerprint);
 
             return;

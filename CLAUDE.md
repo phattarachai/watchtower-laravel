@@ -48,6 +48,23 @@ whose stack is the minified SDK, so it reads as if Watchtower itself were crashi
 Both files publish under the `watchtower-js` tag. `livewire.js` is deliberately import-free so it can
 be unit-tested without a bundler or npm install.
 
+## Core first
+
+Ingest logic is shared with the central Watchtower server (`/Users/phatchai/www/watchtower`) through
+[`phattarachai/watchtower-core`](https://github.com/phattarachai/watchtower-core) (sibling checkout at
+`/Users/phatchai/www/packages/watchtower-core`). Before changing how an event is parsed, decoded, scrubbed,
+normalized, trimmed or fingerprinted, make the change in core so the server gets it too. This package keeps only the
+Laravel wiring: config → constructor arguments, queue/cache/DB, routes, the Sentry SDK hooks.
+
+- Core is framework-free: no `illuminate/*`, no `config()`. Everything arrives through constructor arguments.
+- Order: core PR → core release (a tag and a GitHub release, which pings Packagist) → bump `phattarachai/watchtower-core`
+  here → then update the central server in the same way.
+- If a fix can't wait for a core release, ship it here and open a follow-up to move it into core. Don't leave a
+  permanent fork of core logic in this package.
+
+Laravel-specific safeguards stay here: `SelfCaptureGuard` (queue events), `IngestThrottle` (RateLimiter), queue
+backpressure, and `watchtower:doctor`.
+
 ## Tests
 
 ```bash

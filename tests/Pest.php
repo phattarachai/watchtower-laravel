@@ -9,6 +9,7 @@ use Phattarachai\WatchtowerLaravel\Server\Models\Event;
 use Phattarachai\WatchtowerLaravel\Server\Models\IssueGroup;
 use Phattarachai\WatchtowerLaravel\Server\Models\Project;
 use Phattarachai\WatchtowerLaravel\Tests\Fixtures\WtUser;
+use Phattarachai\WatchtowerLaravel\Tests\SelfCaptureLoopbackTestCase;
 use Phattarachai\WatchtowerLaravel\Tests\SelfCaptureTestCase;
 use Phattarachai\WatchtowerLaravel\Tests\ServerTestCase;
 use Phattarachai\WatchtowerLaravel\Tests\Support\SentryEnvelope;
@@ -19,6 +20,7 @@ uses(TestCase::class)->in('Feature', 'Unit');
 uses(ServerTestCase::class, RefreshDatabase::class)->in('Server');
 uses(UiTestCase::class, RefreshDatabase::class)->in('Ui');
 uses(SelfCaptureTestCase::class, RefreshDatabase::class)->in('SelfCapture');
+uses(SelfCaptureLoopbackTestCase::class, RefreshDatabase::class)->in('SelfCaptureLoopback');
 
 /**
  * @param  array<string, mixed>  $attributes
