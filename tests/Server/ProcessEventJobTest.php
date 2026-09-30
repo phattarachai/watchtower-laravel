@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Phattarachai\WatchtowerCore\Ingest\EventTruncator;
 use Phattarachai\WatchtowerLaravel\Server\EnvelopeAccepter;
-use Phattarachai\WatchtowerLaravel\Server\Ingest\EventTruncator;
 use Phattarachai\WatchtowerLaravel\Server\Jobs\ProcessEventJob;
 use Phattarachai\WatchtowerLaravel\Server\Models\Event;
 use Phattarachai\WatchtowerLaravel\Server\Models\IssueGroup;
@@ -74,4 +74,28 @@ it('queues a bounded, already-scrubbed payload', function (): void {
 
         return true;
     });
+});
+
+it('stores SQL errors without the row values Laravel inlines', function (): void {
+    $message = "SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'buyer@example.test' for key 'users.users_email_unique' "
+        .'(Connection: mysql, SQL: insert into `users` (`email`) values (buyer@example.test))';
+
+    new ProcessEventJob(makeWatchtowerProject()->id, SentryEnvelope::eventPayload([
+        'exception' => ['values' => [['type' => 'Illuminate\\Database\\UniqueConstraintViolationException', 'value' => $message]]],
+    ]))->handle();
+
+    expect(data_get(Event::query()->sole()->payload, 'exception.values.0.value'))
+        ->not->toContain('buyer@example.test')
+        ->toContain("Duplicate entry '[Filtered]'");
+});
+
+it('keeps SQL values when redaction is switched off', function (): void {
+    config()->set('watchtower.server.ingest.scrub.redact_sql_values', false);
+    $message = "SQLSTATE[23000]: Duplicate entry 'x@y.test' for key 'k' (Connection: mysql, SQL: insert into t values (x@y.test))";
+
+    new ProcessEventJob(makeWatchtowerProject()->id, SentryEnvelope::eventPayload([
+        'exception' => ['values' => [['type' => 'Illuminate\\Database\\UniqueConstraintViolationException', 'value' => $message]]],
+    ]))->handle();
+
+    expect(data_get(Event::query()->sole()->payload, 'exception.values.0.value'))->toBe($message);
 });

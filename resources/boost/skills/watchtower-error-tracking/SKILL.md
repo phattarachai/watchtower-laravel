@@ -1,7 +1,7 @@
 ---
 name: watchtower-error-tracking
 description: "Wire up Watchtower (a self-hosted, Sentry-compatible exception tracker) into a Laravel or browser app, and connect Claude Code to its MCP server for in-conversation issue triage. Triggers on \"Watchtower\", \"set up error tracking\", \"verify the exception was reported\", WATCHTOWER_DSN, SENTRY_LARAVEL_DSN, or VITE_SENTRY_DSN."
-version: 2026.09.30.1
+version: 2026.09.30.2
 ---
 
 # Watchtower error tracking
@@ -78,7 +78,7 @@ On anything with a real queue (Redis + Horizon), do three things `watchtower:ins
 
 2. **Cap Redis.** `maxmemory 1gb` + `maxmemory-policy noeviction` in `redis.conf`. A full Redis then refuses writes — self-capture drops the event and the request carries on — instead of growing until the kernel OOM-kills it and every request 500s.
 
-3. **Know the self-capture loop.** Before 1.2.0 a failing `ProcessEventJob` was reported by the worker, captured into a *new* `ProcessEventJob`, and so on — each generation quoting the last one's payload in its SQL error (one incident: 7 GB queue, Redis OOM-killed 62 times). 1.2.0 drops Watchtower's own job failures from self-capture, rate-limits every ingest path, and caps each queued event at 200 KB. If Redis memory still balloons with `ProcessEventJob` payloads, follow the triage runbook in `reference.md` § "Self-capture loop".
+3. **Know the self-capture loop.** Before 1.2.0 a failing `ProcessEventJob` was reported by the worker, captured into a *new* `ProcessEventJob`, and so on — each generation quoting the last one's payload in its SQL error (one incident: 7 GB queue, Redis OOM-killed 62 times). 1.2.0 drops Watchtower's own job failures from self-capture, rate-limits every ingest path, and caps each queued event at 200 KB; 1.3.0 also stops queueing past `WATCHTOWER_MAX_QUEUE_DEPTH` (5000) jobs, so a dead Horizon can't fill Redis. If Redis memory still balloons with `ProcessEventJob` payloads, follow the triage runbook in `reference.md` § "Self-capture loop".
 
 
 ### Pointing child apps at a standalone host

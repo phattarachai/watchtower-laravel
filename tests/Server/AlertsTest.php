@@ -329,3 +329,14 @@ it('sends nothing through ingest when the project has no active rules', function
 
     Mail::assertNothingQueued();
 });
+
+it('queues alert mail on the Watchtower queue, next to ProcessEventJob', function (): void {
+    config()->set('watchtower.server.queue.connection', 'redis');
+    config()->set('watchtower.server.queue.name', 'watchtower');
+    $group = makeAlertGroup($this->project);
+    makeAlertRule($this->project, AlertType::NewIssue);
+
+    dispatchAlerts($group, makeAlertEvent($group), isNewGroup: true);
+
+    Mail::assertQueued(IssueAlertMail::class, fn (IssueAlertMail $mail): bool => $mail->connection === 'redis' && $mail->queue === 'watchtower');
+});

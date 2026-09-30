@@ -11,6 +11,10 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Phattarachai\WatchtowerCore\Alerts\Contracts\EventCounter;
 use Phattarachai\WatchtowerCore\Alerts\Contracts\NotificationLog;
+use Phattarachai\WatchtowerCore\Ingest\EventNormalizer;
+use Phattarachai\WatchtowerCore\Ingest\EventPipeline;
+use Phattarachai\WatchtowerCore\Ingest\EventScrubber;
+use Phattarachai\WatchtowerCore\Ingest\EventTruncator;
 use Phattarachai\WatchtowerLaravel\Console\DoctorCommand;
 use Phattarachai\WatchtowerLaravel\Console\InstallCommand;
 use Phattarachai\WatchtowerLaravel\Console\ProjectCommand;
@@ -23,8 +27,8 @@ use Phattarachai\WatchtowerLaravel\Server\Alerts\EloquentEventCounter;
 use Phattarachai\WatchtowerLaravel\Server\Alerts\EloquentNotificationLog;
 use Phattarachai\WatchtowerLaravel\Server\EnvelopeAccepter;
 use Phattarachai\WatchtowerLaravel\Server\Http\Middleware\AuthorizeUi;
-use Phattarachai\WatchtowerLaravel\Server\Ingest\EventPipeline;
 use Phattarachai\WatchtowerLaravel\Server\Ingest\IngestThrottle;
+use Phattarachai\WatchtowerLaravel\Server\Ingest\QueueBackpressure;
 use Phattarachai\WatchtowerLaravel\Server\Mcp\McpRegistrar;
 use Phattarachai\WatchtowerLaravel\Server\Sentry\LocalTransport;
 use Phattarachai\WatchtowerLaravel\Support\EnvelopeForwarder;
@@ -40,14 +44,39 @@ class WatchtowerServiceProvider extends ServiceProvider
 
         $this->app->singleton(BeforeSend::class);
         $this->app->singleton(SelfCaptureGuard::class);
-        $this->app->singleton(EventPipeline::class);
         $this->app->singleton(IngestThrottle::class);
+        $this->app->singleton(QueueBackpressure::class);
         $this->app->singleton(EnvelopeForwarder::class);
 
         $this->app->bind(EventCounter::class, EloquentEventCounter::class);
         $this->app->bind(NotificationLog::class, EloquentNotificationLog::class);
 
+        $this->registerEventPipeline();
         $this->registerSelfCaptureTransport();
+    }
+
+    /**
+     * Core's pipeline, configured from `watchtower.server.*`. A plain binding,
+     * not a singleton, so the objects always reflect current config.
+     */
+    private function registerEventPipeline(): void
+    {
+        $this->app->bind(EventPipeline::class, fn (): EventPipeline => new EventPipeline(
+            new EventScrubber(
+                headerKeys: (array) config('watchtower.server.ingest.scrub.header_keys', []),
+                bodyKeys: (array) config('watchtower.server.ingest.scrub.body_keys', []),
+                placeholder: (string) config('watchtower.server.ingest.scrub.placeholder', '[Filtered]'),
+                redactSqlValues: (bool) config('watchtower.server.ingest.scrub.redact_sql_values', true),
+            ),
+            new EventNormalizer(
+                allowedEventFields: (array) config('watchtower.server.ingest.allowed_event_fields', []),
+                allowedContextKeys: (array) config('watchtower.server.ingest.allowed_context_keys', []),
+            ),
+            new EventTruncator(
+                maxEventBytes: (int) config('watchtower.server.max_event_bytes', 200_000),
+                maxStringBytes: (int) config('watchtower.server.max_string_bytes', 8_192),
+            ),
+        ));
     }
 
     /**

@@ -86,6 +86,11 @@ return [
         'max_event_bytes' => (int) env('WATCHTOWER_MAX_EVENT_BYTES', 200_000),
         'max_string_bytes' => (int) env('WATCHTOWER_MAX_STRING_BYTES', 8_192),
 
+        // Once this many jobs wait on the Watchtower queue (no worker, or one
+        // that can't keep up), new events are counted on their issue instead of
+        // queued, so a dead Horizon can't fill Redis. 0 disables the check.
+        'max_queue_depth' => (int) env('WATCHTOWER_MAX_QUEUE_DEPTH', 5_000),
+
         'ingest' => [
             // Top-level keys retained from a Sentry event payload. Anything
             // else is dropped before the row is written.
@@ -105,6 +110,12 @@ return [
                 'header_keys' => ['cookie', 'authorization', 'x-csrf-token', 'x-api-key', 'x-auth-token'],
                 'body_keys' => ['password', 'pwd', 'passwd', 'token', 'secret', 'api_key', 'access_token', 'refresh_token', 'authorization'],
                 'placeholder' => '[Filtered]',
+
+                // Strip row values out of SQL error messages — Laravel's
+                // QueryException inlines every binding into its message — and
+                // drop `bindings` from query breadcrumbs. The query template
+                // still arrives in the SQL breadcrumbs.
+                'redact_sql_values' => filter_var(env('WATCHTOWER_REDACT_SQL_VALUES', true), FILTER_VALIDATE_BOOL),
             ],
         ],
     ],

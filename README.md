@@ -98,7 +98,9 @@ Watchtower's own queue failures are never self-captured: anything a worker repor
 
 Every ingest path — HTTP, the relay and self-capture — shares a per-project budget (`WATCHTOWER_RATE_LIMIT_PER_MIN`)
 and a per-issue one (`WATCHTOWER_RATE_LIMIT_PER_FINGERPRINT_PER_MIN`). Events over budget are counted on their issue
-but not queued. Each event is scrubbed and trimmed to `WATCHTOWER_MAX_EVENT_BYTES` (200 KB) before it is queued.
+but not queued, and nothing is queued past `WATCHTOWER_MAX_QUEUE_DEPTH` waiting jobs. Each event is scrubbed (SQL row
+values included) and trimmed to `WATCHTOWER_MAX_EVENT_BYTES` (200 KB) before it is queued, by the pipeline in
+[`phattarachai/watchtower-core`](https://github.com/phattarachai/watchtower-core) that the central server shares.
 
 On Redis + Horizon, run events on a dedicated queue. Add a supervisor first, then point Watchtower at it:
 
@@ -117,7 +119,7 @@ On Redis + Horizon, run events on a dedicated queue. Add a supervisor first, the
 WATCHTOWER_QUEUE_NAME=watchtower
 ```
 
-`watchtower:doctor` fails if no Horizon supervisor consumes that queue. Cap Redis too (`maxmemory 1gb`,
+`watchtower:doctor` fails if no Horizon supervisor consumes that queue, and warns about an uncapped or evicting Redis. Cap Redis too (`maxmemory 1gb`,
 `maxmemory-policy noeviction`) so a runaway fails writes instead of getting Redis OOM-killed. The bundled skill's
 `reference.md` has the full Horizon block and a triage runbook for a queue that is already flooded.
 
@@ -146,6 +148,8 @@ central server: `list_issues`, `get_issue`, `list_events`, `get_event`, `get_sta
 | `WATCHTOWER_MAX_PAYLOAD_BYTES` | `1048576`                  | Largest envelope body accepted, as sent.                         |
 | `WATCHTOWER_MAX_EVENT_BYTES`  | `200000`                    | Events are trimmed to this JSON size before being queued.        |
 | `WATCHTOWER_MAX_STRING_BYTES` | `8192`                      | Cap on any single string in an event.                            |
+| `WATCHTOWER_MAX_QUEUE_DEPTH`  | `5000`                      | Past this many waiting jobs, events are counted, not queued.     |
+| `WATCHTOWER_REDACT_SQL_VALUES` | `true`                     | Strip row values from SQL error messages and query breadcrumbs.  |
 | `WATCHTOWER_RELAY_ENABLED`    | `true`                      | Register the relay route on boot.                                |
 | `WATCHTOWER_RELAY_PATH`       | `/api/watchtower-relay`     | Relay endpoint path (must live under `/api/`).                   |
 | `WATCHTOWER_RELAY_TIMEOUT`    | `5`                         | Upstream request timeout (seconds).                              |

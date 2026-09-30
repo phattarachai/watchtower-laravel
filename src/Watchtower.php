@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Gate;
  */
 final class Watchtower
 {
-    public const string VERSION = '1.2.0';
+    public const string VERSION = '1.3.0';
 
     /** @var (Closure(Request): bool)|null */
     private static ?Closure $authUsing = null;

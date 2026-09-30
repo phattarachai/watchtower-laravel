@@ -16,6 +16,7 @@ use Illuminate\Support\Str;
 use Phattarachai\WatchtowerLaravel\Jobs\ForwardEnvelope;
 use Phattarachai\WatchtowerLaravel\Sentry\SelfCaptureGuard;
 use Phattarachai\WatchtowerLaravel\Server\Jobs\ProcessEventJob;
+use Phattarachai\WatchtowerLaravel\Server\Mail\IssueAlertMail;
 use Phattarachai\WatchtowerLaravel\Server\Models\Event as StoredEvent;
 use Phattarachai\WatchtowerLaravel\Tests\Support\SentryEnvelope;
 
@@ -105,4 +106,16 @@ it('drops an exception whose stack runs through ProcessEventJob', function (): v
     }
 
     $this->fail('ProcessEventJob should have thrown.');
+});
+
+it('treats a queued alert mail as a Watchtower job', function (): void {
+    $payload = json_encode([
+        'uuid' => (string) Str::uuid(),
+        'displayName' => IssueAlertMail::class,
+        'job' => 'Illuminate\\Queue\\CallQueuedHandler@call',
+        'data' => ['commandName' => 'Illuminate\\Mail\\SendQueuedMailable', 'command' => ''],
+    ], JSON_THROW_ON_ERROR);
+
+    expect(guard()->isWatchtowerJob(new SyncJob(app(), $payload, 'redis', 'watchtower')))->toBeTrue()
+        ->and(guard()->isWatchtowerJob(queuedJob('Illuminate\\Mail\\SendQueuedMailable')))->toBeFalse();
 });

@@ -1,7 +1,7 @@
 ---
 name: watchtower-error-tracking-reference
 description: 'End-to-end install reference for wiring Watchtower error tracking into a new project. Covers Laravel backends (via the phattarachai/watchtower-laravel package, one command — including the package''s smart defaults: multi-guard user-context middleware, BeforeSend noise filter + secret scrubbing, breadcrumb env keys), the embedded standalone/dual server the same package can run inside the host app, browser JavaScript frontends (via @sentry/browser with the tunnel option and the published initWatchtower helper), the verify-via-REST flow, the project-scoped MCP server for in-conversation triage from Claude Code, and troubleshooting. Read this when SKILL.md directs you here, or when the user wants to install, configure, verify, triage, or troubleshoot Watchtower error tracking.'
-version: 2026.09.30.1
+version: 2026.09.30.2
 ---
 
 # Watchtower install — reference
@@ -137,7 +137,7 @@ This app's own exceptions reach the store through `watchtower.server.self_captur
 | `loopback` | The SDK posts over HTTP back into the app's own ingest route. Use when you specifically want the wire path exercised. |
 | `false` | No self-capture. |
 
-Either way, **Watchtower's own queue failures are never self-captured.** Anything a worker reports while running, failing, or recording the failure of a `ProcessEventJob` or `ForwardEnvelope` — the job's exception, `MaxAttemptsExceededException` / `TimeoutExceededException` naming it, even the `failed_jobs` insert blowing up — is dropped before it reaches the SDK transport. This guard runs even with `WATCHTOWER_BEFORE_SEND=false`. Those failures still land in `failed_jobs` and the worker log.
+Either way, **Watchtower's own queue failures are never self-captured.** Anything a worker reports while running, failing, or recording the failure of a `ProcessEventJob`, a `ForwardEnvelope` or a queued alert mail (`IssueAlertMail`, which rides the same queue) — the job's exception, `MaxAttemptsExceededException` / `TimeoutExceededException` naming it, even the `failed_jobs` insert blowing up — is dropped before it reaches the SDK transport. This guard runs even with `WATCHTOWER_BEFORE_SEND=false`. Those failures still land in `failed_jobs` and the worker log.
 
 ### Env keys
 
@@ -157,11 +157,13 @@ Either way, **Watchtower's own queue failures are never self-captured.** Anythin
 | `WATCHTOWER_MAX_PAYLOAD_BYTES` | `1048576` | Reject bigger envelope bodies (as sent). A gzip body may inflate to at most 20× this. |
 | `WATCHTOWER_MAX_EVENT_BYTES` | `200000` | Every event is trimmed to this JSON size *before* it is queued. `0` disables. |
 | `WATCHTOWER_MAX_STRING_BYTES` | `8192` | Any single string (an exception message quoting SQL, a breadcrumb) is capped at this. |
+| `WATCHTOWER_MAX_QUEUE_DEPTH` | `5000` | Once this many jobs wait on the Watchtower queue, new events are counted on their issue instead of queued — a dead Horizon can't fill Redis. Checked at most every 5 s per process. `0` disables; never applies to `sync`. |
+| `WATCHTOWER_REDACT_SQL_VALUES` | `true` | Strip row values from SQL error messages (Laravel's QueryException inlines every binding) and drop `bindings` from query breadcrumbs. The query template still arrives in the SQL breadcrumbs. |
 | `WATCHTOWER_QUEUE_CONNECTION` / `WATCHTOWER_QUEUE_NAME` | (host default) | Where `ProcessEventJob` runs. `sync` is fine for a small install — events are normalized inline. On Redis/Horizon use a dedicated `watchtower` queue — see [Production queue and Redis](#production-queue-and-redis). |
 
-An event over either budget is not queued, but if its issue group exists it is still **counted** — `event_count` and `last_seen_at` move without a payload being stored — so the issue list shows the real volume.
+An event over either budget — or arriving while the queue is past `WATCHTOWER_MAX_QUEUE_DEPTH` — is not queued, but if its issue group exists it is still **counted** — `event_count` and `last_seen_at` move without a payload being stored — so the issue list shows the real volume.
 
-**Trimming** follows Sentry's approach: strings are capped and only the last 100 breadcrumbs kept on every event; then, only while the event is still too big: the oldest breadcrumbs and their `data`, then `extra` + the request body/cookies, then frame locals and the middle of stacks deeper than 50 frames, and finally everything but the exception. A trimmed event carries the tag `watchtower.truncated: true`. Scrubbing and the field allow-list also run before dispatch now, so secrets and `modules` never reach the queue backend.
+**Trimming** follows Sentry's approach: strings are capped and only the last 100 breadcrumbs kept on every event; then, only while the event is still too big: the oldest breadcrumbs and their `data`, then `extra` + the request body/cookies, then frame locals and the middle of stacks deeper than 50 frames, and finally everything but the exception. A trimmed event carries the tag `watchtower.truncated: true`. Scrubbing and the field allow-list also run before dispatch now, so secrets and `modules` never reach the queue backend. The scrub → normalize → trim pipeline and the gzip inflate cap live in `phattarachai/watchtower-core`, shared with the central server.
 
 `ProcessEventJob` is idempotent: a retry, a job restored from a Redis snapshot, or two workers racing on a new fingerprint converge on one event row and one group. It has `tries = 3`, `backoff = [5, 30]`, `timeout = 30`, `failOnTimeout = true`.
 
@@ -218,7 +220,7 @@ Rules live on `watchtower_alert_rules` and use the same types and suppression se
 WATCHTOWER_QUEUE_NAME=watchtower
 ```
 
-Deploy, `php artisan horizon:terminate` so the new supervisor starts, then `php artisan watchtower:doctor` — it **fails** when no supervisor in the current environment consumes `[connection:queue]`. Without Horizon, run a worker with `--queue=watchtower` (or append it: `--queue=default,watchtower`).
+Deploy, `php artisan horizon:terminate` so the new supervisor starts, then `php artisan watchtower:doctor` — it **fails** when no supervisor in the current environment consumes `[connection:queue]`, and warns when the queue's Redis has no `maxmemory` or an evicting policy. Alert mail is queued on the same connection and queue. Without Horizon, run a worker with `--queue=watchtower` (or append it: `--queue=default,watchtower`).
 
 **Redis memory guard.** An unbounded Redis on a box that also serves the app turns any queue runaway into an outage: it grows until the kernel OOM-kills it, and every request that touches cache, session or queue 500s. Cap it:
 
@@ -228,7 +230,9 @@ maxmemory 1gb
 maxmemory-policy noeviction   # queues must not be evicted — fail writes instead
 ```
 
-With `noeviction` a full Redis rejects writes; self-capture swallows the failed dispatch and the request carries on. If cache and queues share one Redis, prefer a second instance (or DB on a separate server) for cache with `allkeys-lru` rather than an evicting policy on the queue instance. Also set `vm.overcommit_memory = 1` so RDB snapshots can fork.
+With `noeviction` a full Redis rejects writes; self-capture swallows the failed dispatch and the request carries on.
+
+**Horizon's own copies.** Horizon stores a hash with the full payload of every job and keeps it for `trim.recent` / `trim.completed` minutes (60 by default) — that, not the queue, was 3.7 GB in the incident. Worst case is roughly events-per-minute × event size × 60: at the default 300/min and a 200 KB cap that is 3.6 GB, typical events are 10–30 KB. If memory is tight, lower `trim.recent` and `trim.completed` (they apply to all jobs), or lower `WATCHTOWER_RATE_LIMIT_PER_MIN` / `WATCHTOWER_MAX_EVENT_BYTES`. Marking the job `Silenced` does **not** help — Horizon keeps silenced job hashes for the same `trim.completed` window. If cache and queues share one Redis, prefer a second instance (or DB on a separate server) for cache with `allkeys-lru` rather than an evicting policy on the queue instance. Also set `vm.overcommit_memory = 1` so RDB snapshots can fork.
 
 ### Self-capture loop — triage
 
