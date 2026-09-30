@@ -45,6 +45,11 @@ return [
             'middleware' => ['throttle:60,1'],
         ],
 
+        // Where ProcessEventJob runs. null = the host's default connection and
+        // queue. Recommended: a dedicated queue (WATCHTOWER_QUEUE_NAME=watchtower)
+        // with its own Horizon supervisor, so a burst of error events can never
+        // starve — or be starved by — the app's own jobs. Only set it once a
+        // worker listens on that queue, or events will sit unprocessed.
         'queue' => [
             'connection' => env('WATCHTOWER_QUEUE_CONNECTION'),
             'name' => env('WATCHTOWER_QUEUE_NAME'),
@@ -66,9 +71,20 @@ return [
             'redirect_guests_to' => env('WATCHTOWER_UI_LOGIN_ROUTE', 'login'),
         ],
 
+        // Per-minute event budgets, applied on every ingest path — HTTP, the
+        // relay and in-process self-capture. Events over budget are not queued;
+        // they still count on their issue group. 0 disables a budget.
         'rate_limit_per_min' => (int) env('WATCHTOWER_RATE_LIMIT_PER_MIN', 300),
+        'rate_limit_per_fingerprint_per_min' => (int) env('WATCHTOWER_RATE_LIMIT_PER_FINGERPRINT_PER_MIN', 20),
 
+        // Largest accepted envelope body, as sent (possibly gzipped).
         'max_payload_bytes' => (int) env('WATCHTOWER_MAX_PAYLOAD_BYTES', 1_048_576),
+
+        // Every event is trimmed to this JSON size before it is queued: long
+        // strings are capped at max_string_bytes, then breadcrumbs, extra, the
+        // request body and frame locals go until it fits. 0 disables trimming.
+        'max_event_bytes' => (int) env('WATCHTOWER_MAX_EVENT_BYTES', 200_000),
+        'max_string_bytes' => (int) env('WATCHTOWER_MAX_STRING_BYTES', 8_192),
 
         'ingest' => [
             // Top-level keys retained from a Sentry event payload. Anything
@@ -104,6 +120,10 @@ return [
     'forwarder' => [
         'verify_ssl' => filter_var(env('WATCHTOWER_VERIFY_SSL', true), FILTER_VALIDATE_BOOL),
         'connect_timeout' => (float) env('WATCHTOWER_CONNECT_TIMEOUT', 3),
+
+        // gzip envelopes the browser sent uncompressed (bodies of 1 KB and up)
+        // before forwarding them upstream.
+        'gzip' => filter_var(env('WATCHTOWER_FORWARD_GZIP', true), FILTER_VALIDATE_BOOL),
     ],
 
     'user_context' => [

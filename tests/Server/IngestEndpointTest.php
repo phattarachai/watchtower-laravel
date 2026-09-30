@@ -166,3 +166,32 @@ it('queues the process job on the configured connection and queue', function ():
         && $job->connection === 'redis'
         && $job->queue === 'watchtower-ingest');
 });
+
+function postGzippedEnvelope(int $projectId, string $key, string $body): TestResponse
+{
+    return test()->call('POST', "/watchtower/api/{$projectId}/envelope", server: [
+        'CONTENT_TYPE' => 'application/x-sentry-envelope',
+        'HTTP_CONTENT_ENCODING' => 'gzip',
+        'HTTP_X_SENTRY_AUTH' => "Sentry sentry_version=7, sentry_key={$key}",
+    ], content: (string) gzencode($body));
+}
+
+it('inflates a gzipped envelope', function (): void {
+    $project = makeWatchtowerProject();
+
+    postGzippedEnvelope($project->id, $project->public_key, SentryEnvelope::build())->assertSuccessful();
+
+    expect(Event::count())->toBe(1);
+});
+
+it('refuses to inflate a gzip body past twenty times the payload cap', function (): void {
+    config()->set('watchtower.server.max_payload_bytes', 10_000);
+    $project = makeWatchtowerProject();
+    $bomb = SentryEnvelope::build(['message' => str_repeat('a', 300_000)]);
+
+    $response = postGzippedEnvelope($project->id, $project->public_key, $bomb);
+
+    $response->assertSuccessful();
+    expect(strlen((string) gzencode($bomb)))->toBeLessThan(10_000)
+        ->and(Event::count())->toBe(0);
+});

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Phattarachai\WatchtowerLaravel\Server\Sentry;
 
+use Phattarachai\WatchtowerLaravel\Sentry\SelfCaptureGuard;
 use Phattarachai\WatchtowerLaravel\Server\EnvelopeAccepter;
 use Sentry\Event;
 use Sentry\Serializer\PayloadSerializerInterface;
@@ -17,6 +18,9 @@ use Throwable;
  * store: the SDK serializes the envelope exactly as it would for an HTTP POST,
  * and it is handed to the same accepter the ingest route uses. No socket, no
  * round trip, and BeforeSend has already run by the time send() is called.
+ *
+ * `$sending` stops re-entrancy inside one process; the guard stops the loop
+ * that runs through the queue — a worker reporting a failed Watchtower job.
  */
 final class LocalTransport implements TransportInterface
 {
@@ -25,11 +29,12 @@ final class LocalTransport implements TransportInterface
     public function __construct(
         private readonly PayloadSerializerInterface $serializer,
         private readonly EnvelopeAccepter $accepter,
+        private readonly SelfCaptureGuard $guard,
     ) {}
 
     public function send(Event $event): Result
     {
-        if ($this->sending) {
+        if ($this->sending || $this->guard->inWatchtowerJob()) {
             return new Result(ResultStatus::skipped(), $event);
         }
 

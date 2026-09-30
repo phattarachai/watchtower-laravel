@@ -136,3 +136,44 @@ it('flags a missing DSN in relay mode', function (): void {
         ->expectsOutputToContain('watchtower.dsn is missing or malformed')
         ->assertExitCode(1);
 });
+
+it('advises a dedicated queue when events share the default one', function (): void {
+    config()->set('watchtower.server.self_capture', 'loopback');
+    config()->set('watchtower.server.queue.connection', 'redis');
+    wireDoctorFixture();
+
+    $this->artisan('watchtower:doctor')
+        ->expectsOutputToContain('WATCHTOWER_QUEUE_NAME=watchtower')
+        ->assertSuccessful();
+});
+
+it('fails when no Horizon supervisor consumes the Watchtower queue', function (): void {
+    config()->set('watchtower.server.self_capture', 'loopback');
+    config()->set('watchtower.server.queue.connection', 'redis');
+    config()->set('watchtower.server.queue.name', 'watchtower');
+    config()->set('horizon', [
+        'defaults' => ['app-supervisor-default' => ['connection' => 'redis', 'queue' => ['default']]],
+        'environments' => ['testing' => ['app-supervisor-default' => []]],
+    ]);
+    wireDoctorFixture();
+
+    $this->artisan('watchtower:doctor')
+        ->expectsOutputToContain('events would pile up unprocessed')
+        ->assertFailed();
+});
+
+it('passes when a Horizon supervisor consumes the Watchtower queue', function (): void {
+    config()->set('watchtower.server.self_capture', 'loopback');
+    config()->set('watchtower.server.queue.connection', 'redis');
+    config()->set('watchtower.server.queue.name', 'watchtower');
+    config()->set('horizon', [
+        'defaults' => [
+            'app-supervisor-default' => ['connection' => 'redis', 'queue' => ['default']],
+            'app-supervisor-watchtower' => ['connection' => 'redis', 'queue' => ['watchtower'], 'maxProcesses' => 1],
+        ],
+        'environments' => ['testing' => ['app-supervisor-default' => [], 'app-supervisor-watchtower' => []]],
+    ]);
+    wireDoctorFixture();
+
+    $this->artisan('watchtower:doctor')->assertSuccessful();
+});

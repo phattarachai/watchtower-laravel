@@ -1,7 +1,7 @@
 ---
 name: watchtower-error-tracking-reference
-description: End-to-end install reference for wiring Watchtower error tracking into a new project. Covers Laravel backends (via the phattarachai/watchtower-laravel package, one command — including the package's smart defaults: multi-guard user-context middleware, BeforeSend noise filter + secret scrubbing, breadcrumb env keys), the embedded standalone/dual server the same package can run inside the host app, browser JavaScript frontends (via @sentry/browser with the tunnel option and the published initWatchtower helper), the verify-via-REST flow, the project-scoped MCP server for in-conversation triage from Claude Code, and troubleshooting. Read this when SKILL.md directs you here, or when the user wants to install, configure, verify, triage, or troubleshoot Watchtower error tracking.
-version: 2026.08.30.1
+description: 'End-to-end install reference for wiring Watchtower error tracking into a new project. Covers Laravel backends (via the phattarachai/watchtower-laravel package, one command — including the package''s smart defaults: multi-guard user-context middleware, BeforeSend noise filter + secret scrubbing, breadcrumb env keys), the embedded standalone/dual server the same package can run inside the host app, browser JavaScript frontends (via @sentry/browser with the tunnel option and the published initWatchtower helper), the verify-via-REST flow, the project-scoped MCP server for in-conversation triage from Claude Code, and troubleshooting. Read this when SKILL.md directs you here, or when the user wants to install, configure, verify, triage, or troubleshoot Watchtower error tracking.'
+version: 2026.09.30.1
 ---
 
 # Watchtower install — reference
@@ -86,6 +86,13 @@ Default: sync (Guzzle POST to upstream within the request lifecycle). The browse
 
 Opt in to async by setting `WATCHTOWER_RELAY_ASYNC=true` — the relay dispatches a `ForwardEnvelope` job and returns 202 immediately. Requires a real queue (Redis / Horizon / database driver). Set `WATCHTOWER_RELAY_QUEUE` if you want a non-default queue name.
 
+Both paths go through one forwarder that:
+
+- **reuses its HTTP client**, so a queue worker (or Octane) keeps the upstream TLS connection alive across envelopes instead of handshaking per envelope. Under PHP-FPM each request still opens its own connection — async forwarding is the way to amortize it;
+- **gzips** envelopes of 1 KB and up that the browser sent uncompressed (`WATCHTOWER_FORWARD_GZIP=false` to turn off). Every Watchtower relay endpoint inflates `Content-Encoding: gzip`.
+
+`ForwardEnvelope` retries an unreachable upstream or a 5xx twice (10 s, then 60 s), drops a 4xx — including a 429, which is the upstream asking for less traffic — and on its last attempt logs a warning and completes, so an upstream outage never parks envelope bodies in `failed_jobs`.
+
 ### Configuration reference
 
 `config/watchtower.php` exposes all knobs through env:
@@ -101,6 +108,7 @@ Opt in to async by setting `WATCHTOWER_RELAY_ASYNC=true` — the relay dispatche
 | `WATCHTOWER_RELAY_TIMEOUT` | `5` | Guzzle request timeout (seconds). |
 | `WATCHTOWER_CONNECT_TIMEOUT` | `3` | Guzzle connect timeout (seconds, float). |
 | `WATCHTOWER_VERIFY_SSL` | `true` | Disable for self-signed dev Watchtower instances only. |
+| `WATCHTOWER_FORWARD_GZIP` | `true` | gzip uncompressed envelopes (≥ 1 KB) before forwarding upstream. |
 | `WATCHTOWER_USER_CONTEXT` | `true` | Set `false` to disable the auto-pushed [user context middleware](#user-context-middleware) entirely. |
 | `WATCHTOWER_USER_CONTEXT_GUARDS` | `auto` | `auto` walks `array_keys(config('auth.guards'))`; or a comma-separated list (`web,admin,api`) to fix priority and narrow the set. First authenticated guard wins. |
 | `WATCHTOWER_BEFORE_SEND` | `true` | Set `false` to skip the [BeforeSend pipeline](#beforesend-pipeline) (no noise drop, no scrubbing). |
@@ -129,6 +137,8 @@ This app's own exceptions reach the store through `watchtower.server.self_captur
 | `loopback` | The SDK posts over HTTP back into the app's own ingest route. Use when you specifically want the wire path exercised. |
 | `false` | No self-capture. |
 
+Either way, **Watchtower's own queue failures are never self-captured.** Anything a worker reports while running, failing, or recording the failure of a `ProcessEventJob` or `ForwardEnvelope` — the job's exception, `MaxAttemptsExceededException` / `TimeoutExceededException` naming it, even the `failed_jobs` insert blowing up — is dropped before it reaches the SDK transport. This guard runs even with `WATCHTOWER_BEFORE_SEND=false`. Those failures still land in `failed_jobs` and the worker log.
+
 ### Env keys
 
 | Env key | Default | Purpose |
@@ -142,9 +152,18 @@ This app's own exceptions reach the store through `watchtower.server.self_captur
 | `WATCHTOWER_UI_DOMAIN` | `null` | Serve the console on its own domain. |
 | `WATCHTOWER_UI_LOGIN_ROUTE` | `login` | Route name (or URL) a rejected **guest** is redirected to. `null` 403s instead. |
 | `WATCHTOWER_MCP_ENABLED` | `true` | Registration is skipped anyway when `laravel/mcp` isn't installed. |
-| `WATCHTOWER_RATE_LIMIT_PER_MIN` | `300` | Per-project ingest throttle, over the host's cache store — no Redis needed. |
-| `WATCHTOWER_MAX_PAYLOAD_BYTES` | `1048576` | Reject bigger envelope bodies. |
-| `WATCHTOWER_QUEUE_CONNECTION` / `WATCHTOWER_QUEUE_NAME` | (host default) | Where `ProcessEventJob` runs. `sync` is fine for a small install — events are normalized inline. |
+| `WATCHTOWER_RATE_LIMIT_PER_MIN` | `300` | Per-project event budget per minute, over the host's cache store — no Redis needed. Applies to **every** ingest path: the HTTP endpoint (429 once spent), the relay, and in-process self-capture. `0` disables. |
+| `WATCHTOWER_RATE_LIMIT_PER_FINGERPRINT_PER_MIN` | `20` | Per-issue budget, so one hot error can't spend the project's budget or flood the queue. `0` disables. |
+| `WATCHTOWER_MAX_PAYLOAD_BYTES` | `1048576` | Reject bigger envelope bodies (as sent). A gzip body may inflate to at most 20× this. |
+| `WATCHTOWER_MAX_EVENT_BYTES` | `200000` | Every event is trimmed to this JSON size *before* it is queued. `0` disables. |
+| `WATCHTOWER_MAX_STRING_BYTES` | `8192` | Any single string (an exception message quoting SQL, a breadcrumb) is capped at this. |
+| `WATCHTOWER_QUEUE_CONNECTION` / `WATCHTOWER_QUEUE_NAME` | (host default) | Where `ProcessEventJob` runs. `sync` is fine for a small install — events are normalized inline. On Redis/Horizon use a dedicated `watchtower` queue — see [Production queue and Redis](#production-queue-and-redis). |
+
+An event over either budget is not queued, but if its issue group exists it is still **counted** — `event_count` and `last_seen_at` move without a payload being stored — so the issue list shows the real volume.
+
+**Trimming** follows Sentry's approach: strings are capped and only the last 100 breadcrumbs kept on every event; then, only while the event is still too big: the oldest breadcrumbs and their `data`, then `extra` + the request body/cookies, then frame locals and the middle of stacks deeper than 50 frames, and finally everything but the exception. A trimmed event carries the tag `watchtower.truncated: true`. Scrubbing and the field allow-list also run before dispatch now, so secrets and `modules` never reach the queue backend.
+
+`ProcessEventJob` is idempotent: a retry, a job restored from a Redis snapshot, or two workers racing on a new fingerprint converge on one event row and one group. It has `tries = 3`, `backoff = [5, 30]`, `timeout = 30`, `failOnTimeout = true`.
 
 Array-only knobs under `watchtower.server.ingest`: `allowed_event_fields`, `allowed_context_keys`, and `scrub.{header_keys, body_keys, placeholder}` — the allow-list applied before the row is written.
 
@@ -163,6 +182,90 @@ Rules live on `watchtower_alert_rules` and use the same types and suppression se
 | `watchtower:doctor` | The verification step for embedded installs. Checks tables, routes, the published Inertia page, the Vite alias, the Tailwind lines, an active project, and that self-capture is bound. Advisories for mailer, queue driver and missing `laravel/mcp`. |
 | `watchtower:project {list\|create\|rotate-key\|activate\|deactivate}` | Project management without a browser. `list` prints keys and DSNs. |
 | `watchtower:prune` | Scheduled daily by the package. Deletes events past retention and notification rows older than 90 days; issue groups survive. |
+
+### Production queue and Redis
+
+**Dedicated queue.** `ProcessEventJob` defaults to the host's default queue, because a queue name no worker listens on would leave events unprocessed. On Redis + Horizon, move it to its own queue so a burst of errors can't starve the app's jobs (or the reverse), and so a runaway can be flushed without touching them. Supervisor first, env key second:
+
+```php
+// config/horizon.php
+'defaults' => [
+    // …the app's existing supervisor(s)…
+    'app-supervisor-watchtower' => [
+        'connection' => 'redis',
+        'queue' => ['watchtower'],
+        'balance' => false,
+        'maxProcesses' => 1,
+        'tries' => 3,
+        'timeout' => 60,   // > ProcessEventJob's 30 s timeout, < the redis connection's retry_after (90)
+        'memory' => 256,
+    ],
+],
+
+'environments' => [
+    'production' => [
+        // …
+        'app-supervisor-watchtower' => ['maxProcesses' => 2],
+    ],
+    'local' => [
+        // …
+        'app-supervisor-watchtower' => [],
+    ],
+],
+```
+
+```dotenv
+WATCHTOWER_QUEUE_NAME=watchtower
+```
+
+Deploy, `php artisan horizon:terminate` so the new supervisor starts, then `php artisan watchtower:doctor` — it **fails** when no supervisor in the current environment consumes `[connection:queue]`. Without Horizon, run a worker with `--queue=watchtower` (or append it: `--queue=default,watchtower`).
+
+**Redis memory guard.** An unbounded Redis on a box that also serves the app turns any queue runaway into an outage: it grows until the kernel OOM-kills it, and every request that touches cache, session or queue 500s. Cap it:
+
+```conf
+# redis.conf
+maxmemory 1gb
+maxmemory-policy noeviction   # queues must not be evicted — fail writes instead
+```
+
+With `noeviction` a full Redis rejects writes; self-capture swallows the failed dispatch and the request carries on. If cache and queues share one Redis, prefer a second instance (or DB on a separate server) for cache with `allkeys-lru` rather than an evicting policy on the queue instance. Also set `vm.overcommit_memory = 1` so RDB snapshots can fork.
+
+### Self-capture loop — triage
+
+**Symptom:** Redis memory climbing, `redis-cli llen` on the queue in the tens of thousands, Horizon full of `ProcessEventJob`, `watchtower_events` / `failed_jobs` / `laravel.log` growing by GB, possibly Redis OOM kills. Before 1.2.0 the cause was a failing `ProcessEventJob` being captured into a new one; the payload nests every generation (each SQL error quotes the previous job).
+
+```bash
+# 1. Confirm what holds the memory (keys carry the REDIS_PREFIX, e.g. myapp_database_)
+redis-cli info memory | grep used_memory_human
+redis-cli --memkeys                                  # biggest keys by memory (redis-cli ≥ 6)
+redis-cli llen myapp_database_queues:default         # or :watchtower
+
+# 2. Stop the consumers so the loop can't refill the queue
+php artisan horizon:pause                            # or: supervisorctl stop horizon
+
+# 3. Break the loop at the source until the package is upgraded
+#    .env: WATCHTOWER_SELF_CAPTURE=false, then:
+php artisan config:clear
+
+# 4. Drop the runaway queue. UNLINK frees memory asynchronously.
+#    On the shared `default` queue this also drops the app's own pending jobs — that is
+#    the main argument for the dedicated `watchtower` queue.
+redis-cli UNLINK myapp_database_queues:default myapp_database_queues:default:reserved myapp_database_queues:default:delayed
+
+# 5. Horizon keeps a hash per job (full payload) for its recent/failed lists, expired after
+#    `horizon.trim` minutes. Free the failed ones now; the rest age out (or lower `trim` briefly).
+php artisan horizon:forget --all
+
+# 6. Clean up the database side
+php artisan queue:flush                              # failed_jobs
+php artisan watchtower:prune                         # events past retention (or delete the runaway groups in the console)
+
+# 7. Upgrade, move to the dedicated queue, re-enable, resume
+composer update phattarachai/watchtower-laravel
+php artisan horizon:continue                         # or horizon:terminate to pick up new config
+```
+
+The runaway usually shows as one or two issue groups with tens of thousands of events — deleting those groups in the console removes their events. Finally, add the `maxmemory` guard above so the next runaway of any kind degrades instead of taking the box down.
 
 ### Host build requirements
 
@@ -607,7 +710,11 @@ DSN holder gets read **and** mutate access for that one project. Per-user / per-
 | Standalone: `/watchtower` renders unstyled | The Tailwind `@source` line for the package is missing, so none of the module's classes were emitted | `php artisan watchtower:doctor`, then add the line it names and rebuild |
 | Standalone: `/watchtower` 403s for an admin | No auth check registered — the gate is closed outside `local` by default | Register `Watchtower::auth(...)` or a `viewWatchtower` gate |
 | Dual: backend exceptions never reach the central Watchtower | By design — the install points `SENTRY_LARAVEL_DSN` at the local project | Use `relay` mode if the central inbox must see server-side events |
-| Standalone: events accepted but the issue list stays empty | A queue worker isn't running for `WATCHTOWER_QUEUE_CONNECTION` | Start a worker, or set the connection to `sync` for a small install |
+| Standalone: events accepted but the issue list stays empty | A queue worker isn't running for `WATCHTOWER_QUEUE_CONNECTION`, or nothing consumes `WATCHTOWER_QUEUE_NAME` | `php artisan watchtower:doctor`; start a worker / add the Horizon supervisor, or set the connection to `sync` for a small install |
+| Standalone: Redis memory balloons with `ProcessEventJob` payloads | The self-capture loop (pre-1.2.0) or a flood with no dedicated queue | [Self-capture loop — triage](#self-capture-loop--triage) |
+| Standalone: an issue's event count keeps rising but no new events appear | The per-fingerprint budget is dampening it — counted, not stored | Expected. Raise `WATCHTOWER_RATE_LIMIT_PER_FINGERPRINT_PER_MIN` if you need more samples |
+| Standalone: an event shows the `watchtower.truncated` tag | It was over `WATCHTOWER_MAX_EVENT_BYTES` / had strings over `WATCHTOWER_MAX_STRING_BYTES` | Expected; raise the limits if a specific field matters |
+| Standalone: a failing `ProcessEventJob` never shows up in the Watchtower inbox | By design — Watchtower's own job failures are not self-captured | Check `failed_jobs` / Horizon's failed list and the worker log |
 
 ## Updating this skill
 

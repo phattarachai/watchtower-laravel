@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Phattarachai\WatchtowerLaravel\Jobs;
 
-use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -12,7 +11,15 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Phattarachai\WatchtowerLaravel\Support\EnvelopeForwarder;
 
+/**
+ * Async relay forward. An unreachable upstream or a 5xx is retried with
+ * backoff; a 4xx — including 429, the upstream asking us to back off — is
+ * dropped, since resending the same bytes cannot succeed. The job never ends
+ * in `failed_jobs`: an outage would otherwise park every browser envelope
+ * there, body and all. Its failures are never self-captured either.
+ */
 class ForwardEnvelope implements ShouldQueue
 {
     use Dispatchable;
@@ -22,7 +29,12 @@ class ForwardEnvelope implements ShouldQueue
 
     public int $tries = 3;
 
-    public int $backoff = 10;
+    /** @var list<int> */
+    public array $backoff = [10, 60];
+
+    public int $timeout = 30;
+
+    public bool $failOnTimeout = true;
 
     /**
      * @param  array<string, string>  $headers
@@ -33,28 +45,33 @@ class ForwardEnvelope implements ShouldQueue
         public readonly array $headers,
     ) {}
 
-    public function handle(?Client $client = null): void
+    public function handle(EnvelopeForwarder $forwarder): void
     {
-        $client ??= app(Client::class);
-
-        $timeout = (int) config('watchtower.relay.timeout', 5);
-        $verifySsl = (bool) config('watchtower.forwarder.verify_ssl', true);
-        $connectTimeout = (float) config('watchtower.forwarder.connect_timeout', 3);
-
         try {
-            $client->post($this->upstream, [
-                'headers' => $this->headers,
-                'body' => $this->body,
-                'http_errors' => false,
-                'timeout' => $timeout,
-                'connect_timeout' => $connectTimeout,
-                'verify' => $verifySsl,
-            ]);
+            $status = $forwarder->forward($this->upstream, $this->body, $this->headers)->getStatusCode();
         } catch (GuzzleException $e) {
-            Log::warning('watchtower: async forward failed', [
-                'upstream' => $this->upstream,
-                'message' => $e->getMessage(),
-            ]);
+            $this->retryOrGiveUp($e->getMessage());
+
+            return;
         }
+
+        if ($status >= 500) {
+            $this->retryOrGiveUp("upstream answered {$status}");
+        }
+    }
+
+    private function retryOrGiveUp(string $reason): void
+    {
+        if ($this->attempts() < $this->tries) {
+            $this->release($this->backoff[$this->attempts() - 1] ?? 60);
+
+            return;
+        }
+
+        Log::warning('watchtower: async forward failed', [
+            'upstream' => $this->upstream,
+            'attempts' => $this->attempts(),
+            'message' => $reason,
+        ]);
     }
 }
