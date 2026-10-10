@@ -1,6 +1,6 @@
 {
     "name": "phattarachai/watchtower-laravel",
-    "description": "Laravel client for the Watchtower self-hosted Sentry-compatible exception tracker. Wires up sentry/sentry-laravel and a same-origin browser tunnel that dodges ad blockers.",
+    "description": "Sentry-compatible error tracking inside your Laravel app: its own tables, issue UI, alerts and an MCP server for Claude, on top of sentry/sentry-laravel. Can also relay to a central Watchtower server.",
     "type": "library",
     "license": "MIT",
     "keywords": [
@@ -25,7 +25,6 @@
         "illuminate/database": "^12.0 || ^13.0",
         "illuminate/http": "^12.0 || ^13.0",
         "illuminate/support": "^12.0 || ^13.0",
-        "inertiajs/inertia-laravel": "^2.0|^3.0",
         "phattarachai/watchtower-core": "^1.1",
         "sentry/sentry-laravel": "^4.0"
     },
@@ -36,6 +35,7 @@
         }
     ],
     "require-dev": {
+        "inertiajs/inertia-laravel": "^2.0|^3.0",
         "larastan/larastan": "^3.10",
         "laravel/mcp": "^0.7 || ^1.0",
         "laravel/pint": "^1.24",
@@ -44,6 +44,7 @@
         "pestphp/pest-plugin-laravel": "^4.0"
     },
     "suggest": {
+        "inertiajs/inertia-laravel": "Serves the standalone issue UI at /{prefix}. Needs an Inertia + React host with Tailwind v4 (^2.0|^3.0).",
         "laravel/mcp": "Serves the embedded Watchtower MCP server at /{prefix}/mcp so Claude can triage issues in place (^0.7)."
     },
     "autoload": {

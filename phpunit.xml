@@ -18,6 +18,14 @@
         <testsuite name="Ui">
             <directory>tests/Ui</directory>
         </testsuite>
+        <testsuite name="SelfCapture">
+            <directory>tests/SelfCapture</directory>
+            <directory>tests/SelfCaptureLoopback</directory>
+        </testsuite>
+        <testsuite name="WithoutInertia">
+            <directory>tests/WithoutInertia</directory>
+            <directory>tests/RelayWithoutInertia</directory>
+        </testsuite>
     </testsuites>
     <source>
         <include>

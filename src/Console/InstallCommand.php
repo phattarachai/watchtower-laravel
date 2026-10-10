@@ -7,6 +7,7 @@ namespace Phattarachai\WatchtowerLaravel\Console;
 use Illuminate\Console\Command;
 use Illuminate\Support\Str;
 use Phattarachai\WatchtowerLaravel\Server\Models\Project;
+use Phattarachai\WatchtowerLaravel\Server\Ui\UiPage;
 use Phattarachai\WatchtowerLaravel\Support\BootstrapPatcher;
 use Phattarachai\WatchtowerLaravel\Support\ClaudeMcpRegistrar;
 use Phattarachai\WatchtowerLaravel\Support\Dsn;
@@ -127,11 +128,14 @@ class InstallCommand extends Command
         $this->writeBreadcrumbEnvKeys($dryRun);
         $this->patchBootstrap($dryRun);
         $this->publishConfig($dryRun);
-        $this->publishInertiaPage($dryRun);
-        $this->patchHostBuildFiles($dryRun);
+        $this->installUi($dryRun);
         $this->configureFrontend($localDsn, $dryRun);
         $this->installEmbeddedMcp($project, $dryRun);
-        $this->emitAuthSnippet();
+
+        if (UiPage::available()) {
+            $this->emitAuthSnippet();
+        }
+
         $this->emitEmbeddedNextSteps($localDsn);
         $this->emitClosing($dryRun);
 
@@ -269,6 +273,27 @@ class InstallCommand extends Command
         $this->line('  '.$dsn);
     }
 
+    /**
+     * The issue UI is an Inertia + React page. A host without
+     * inertiajs/inertia-laravel gets no React files written into it, only the
+     * instruction to install it and re-run.
+     */
+    private function installUi(bool $dryRun): void
+    {
+        if (UiPage::available()) {
+            $this->publishInertiaPage($dryRun);
+            $this->patchHostBuildFiles($dryRun);
+
+            return;
+        }
+
+        $prefix = trim((string) config('watchtower.server.path', 'watchtower'), '/');
+
+        $this->warn("inertiajs/inertia-laravel is not installed, so the issue UI at /{$prefix} is not mounted.");
+        $this->line('  Ingest, alerts, self-capture and the MCP server work without it. The UI needs an Inertia + React host with Tailwind v4:');
+        $this->line('  composer require inertiajs/inertia-laravel, then re-run php artisan watchtower:install --standalone');
+    }
+
     private function publishInertiaPage(bool $dryRun): void
     {
         $extension = EmbeddedUiPatcher::pageExtension(base_path());
@@ -361,11 +386,18 @@ class InstallCommand extends Command
     {
         $prefix = trim((string) config('watchtower.server.path', 'watchtower'), '/');
 
+        $steps = [
+            ...(UiPage::available() ? ['npm run build (or npm run dev)', 'Visit /'.$prefix] : []),
+            'php artisan watchtower:doctor to confirm the wiring',
+            'On a real queue: set WATCHTOWER_QUEUE_NAME=watchtower and add a worker/Horizon supervisor for it',
+        ];
+
         $this->output->writeln('Next steps:', OutputInterface::OUTPUT_RAW);
-        $this->output->writeln('  1. npm run build (or npm run dev)', OutputInterface::OUTPUT_RAW);
-        $this->output->writeln('  2. Visit /'.$prefix, OutputInterface::OUTPUT_RAW);
-        $this->output->writeln('  3. php artisan watchtower:doctor to confirm the wiring', OutputInterface::OUTPUT_RAW);
-        $this->output->writeln('  4. On a real queue: set WATCHTOWER_QUEUE_NAME=watchtower and add a worker/Horizon supervisor for it', OutputInterface::OUTPUT_RAW);
+
+        foreach ($steps as $index => $step) {
+            $this->output->writeln('  '.($index + 1).'. '.$step, OutputInterface::OUTPUT_RAW);
+        }
+
         $this->output->writeln('  Project DSN: '.$dsn, OutputInterface::OUTPUT_RAW);
         $this->output->writeln('', OutputInterface::OUTPUT_RAW);
     }

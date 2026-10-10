@@ -2,7 +2,9 @@
 
 ## Scope
 
-This package is the Laravel-side wiring + browser-side tunnel proxy for [Watchtower](https://github.com/phattarachai/watchtower), a self-hosted Sentry-compatible exception tracker. It installs `sentry/sentry-laravel`, wires it into `bootstrap/app.php`, and registers `/api/watchtower-relay` so the browser SDK can post envelopes same-origin (ad-blocker safe).
+Sentry-compatible error tracking for Laravel. The public story is **standalone mode**: the host app owns the `watchtower_*` tables, the ingest endpoint, the issue UI and the MCP server. Relay and dual report to a central Watchtower server; that server's repo is private, so never link it from anything shipped (README, the Boost skill and guidelines, this file).
+
+`inertiajs/inertia-laravel` is only suggested. Everything that touches it stays behind `UiPage::available()`, so a relay-only or headless Livewire/Filament host never needs it.
 
 ## Install path
 

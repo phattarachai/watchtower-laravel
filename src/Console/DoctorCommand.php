@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Schema;
 use Phattarachai\WatchtowerLaravel\Server\Mcp\McpRegistrar;
 use Phattarachai\WatchtowerLaravel\Server\Models\Project;
 use Phattarachai\WatchtowerLaravel\Server\Sentry\LocalTransport;
+use Phattarachai\WatchtowerLaravel\Server\Ui\UiPage;
 use Phattarachai\WatchtowerLaravel\Support\Dsn;
 use Phattarachai\WatchtowerLaravel\Support\EmbeddedUiPatcher;
 use Sentry\Client;
@@ -92,21 +93,7 @@ final class DoctorCommand extends Command
             ? null
             : 'Route [watchtower.server.ingest.envelope] is missing.');
 
-        $failures += $this->check('UI route registered', fn (): ?string => match (true) {
-            config('watchtower.server.ui.enabled', true) === false => 'watchtower.server.ui.enabled is false, so the embedded UI is not mounted.',
-            ! Route::has('watchtower.ui.issues') => 'Route [watchtower.ui.issues] is missing.',
-            default => null,
-        });
-
-        $failures += $this->check('Inertia page published', fn (): ?string => EmbeddedUiPatcher::publishedPagePath(base_path()) !== null
-            ? null
-            : 'Re-run `watchtower:install --standalone`, or publish the stub with `vendor:publish --tag=watchtower-inertia` (rename to .tsx for a TypeScript host).');
-
-        $failures += $this->check('Vite alias @watchtower', fn (): ?string => $this->anyViteConfigHasAlias()
-            ? null
-            : 'Add a resolve.alias entry for @watchtower to vite.config.js — see the package README.');
-
-        $failures += $this->checkTailwind();
+        $failures += $this->uiChecks();
         $failures += $this->check('Active project', fn (): ?string => Project::query()->where('is_active', true)->exists()
             ? null
             : 'No active project. Create one with `php artisan watchtower:project create "My App"`.');
@@ -117,6 +104,38 @@ final class DoctorCommand extends Command
         $this->mcpAdvisory();
 
         return $failures + $this->selfCaptureCheck();
+    }
+
+    /**
+     * The issue UI is optional: a host can turn it off and triage through MCP,
+     * and it needs inertiajs/inertia-laravel, which the package only suggests.
+     * The page, alias and Tailwind checks only mean something once both hold.
+     */
+    private function uiChecks(): int
+    {
+        if (config('watchtower.server.ui.enabled', true) === false) {
+            $this->advisory('Issue UI', 'Disabled (WATCHTOWER_UI_ENABLED=false) — triage through the MCP server.');
+
+            return 0;
+        }
+
+        if (! UiPage::available()) {
+            return $this->check('Issue UI', fn (): string => 'inertiajs/inertia-laravel is not installed — `composer require inertiajs/inertia-laravel` to mount the UI (it needs an Inertia + React host), or set WATCHTOWER_UI_ENABLED=false to run without it.');
+        }
+
+        $failures = $this->check('UI route registered', fn (): ?string => Route::has('watchtower.ui.issues')
+            ? null
+            : 'Route [watchtower.ui.issues] is missing.');
+
+        $failures += $this->check('Inertia page published', fn (): ?string => EmbeddedUiPatcher::publishedPagePath(base_path()) !== null
+            ? null
+            : 'Re-run `watchtower:install --standalone`, or publish the stub with `vendor:publish --tag=watchtower-inertia` (rename to .tsx for a TypeScript host).');
+
+        $failures += $this->check('Vite alias @watchtower', fn (): ?string => $this->anyViteConfigHasAlias()
+            ? null
+            : 'Add a resolve.alias entry for @watchtower to vite.config.js — see the package README.');
+
+        return $failures + $this->checkTailwind();
     }
 
     private function checkTailwind(): int

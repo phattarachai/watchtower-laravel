@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Testing\PendingCommand;
 use Phattarachai\WatchtowerLaravel\Console\InstallCommand;
 use Phattarachai\WatchtowerLaravel\Server\Models\Project;
+use Phattarachai\WatchtowerLaravel\Server\Ui\UiPage;
 use Phattarachai\WatchtowerLaravel\Support\ClaudeMcpRegistrar;
 
 beforeEach(function (): void {
@@ -170,6 +171,25 @@ it('is idempotent on a second run', function (): void {
         ->and(substr_count($vite, "import path from 'node:path';"))->toBeLessThanOrEqual(1)
         ->and(substr_count($css, 'prefix(tw)'))->toBe(1)
         ->and(substr_count($css, 'watchtower-laravel/resources/js/watchtower'))->toBe(1);
+});
+
+it('skips the UI files and says to install Inertia when the host has none', function (): void {
+    $realInertiaClass = UiPage::$inertiaClass;
+    UiPage::$inertiaClass = 'Inertia\NotInstalled';
+
+    try {
+        runStandaloneInstall()
+            ->expectsOutputToContain('composer require inertiajs/inertia-laravel')
+            ->doesntExpectOutputToContain('Visit /watchtower')
+            ->assertExitCode(0);
+    } finally {
+        UiPage::$inertiaClass = $realInertiaClass;
+    }
+
+    expect(Project::query()->count())->toBe(1)
+        ->and(is_file(resource_path('js/pages/Watchtower.jsx')))->toBeFalse()
+        ->and(is_file(resource_path('css/watchtower.css')))->toBeFalse()
+        ->and((string) file_get_contents(base_path('vite.config.js')))->not->toContain('@watchtower');
 });
 
 it('keeps the upstream DSN flow for --mode=dual', function (): void {
