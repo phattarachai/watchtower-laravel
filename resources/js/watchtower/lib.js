@@ -145,6 +145,19 @@ export function shortenPath(path) {
   return parts.length <= 3 ? value : `…/${parts.slice(-3).join('/')}`
 }
 
+/**
+ * `:line:column` for a frame. Minified browser bundles put everything on line
+ * 1, so without the column every frame reads `:1`.
+ */
+export function frameLocation(frame) {
+  const line = frame?.lineno
+  if (line === undefined || line === null || line === '') {
+    return ''
+  }
+  const column = frame?.colno
+  return column === undefined || column === null || column === '' ? `:${line}` : `:${line}:${column}`
+}
+
 /** A frame that lives under vendor/node_modules is collapsed by default. */
 export function isVendorFrame(frame) {
   if (frame?.in_app === true) {

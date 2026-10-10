@@ -151,6 +151,7 @@ Either way, **Watchtower's own queue failures are never self-captured.** Anythin
 | `WATCHTOWER_UI_ENABLED` | `true` | `false` for a headless install — ingest + alerts + MCP, no console, no Inertia/Tailwind requirement. |
 | `WATCHTOWER_UI_DOMAIN` | `null` | Serve the console on its own domain. |
 | `WATCHTOWER_UI_LOGIN_ROUTE` | `login` | Route name (or URL) a rejected **guest** is redirected to. `null` 403s instead. |
+| `WATCHTOWER_UI_THEME` | `auto` | `auto` turns the console dark under a `.dark` ancestor (the starter kits put it on `<html>`); `light` or `dark` pins it. |
 | `WATCHTOWER_MCP_ENABLED` | `true` | Registration is skipped anyway when `laravel/mcp` isn't installed. |
 | `WATCHTOWER_RATE_LIMIT_PER_MIN` | `300` | Per-project event budget per minute, over the host's cache store — no Redis needed. Applies to **every** ingest path: the HTTP endpoint (429 once spent), the relay, and in-process self-capture. `0` disables. |
 | `WATCHTOWER_RATE_LIMIT_PER_FINGERPRINT_PER_MIN` | `20` | Per-issue budget, so one hot error can't spend the project's budget or flood the queue. `0` disables. |
@@ -279,7 +280,7 @@ The console is an Inertia page, so the host needs `inertiajs/inertia-laravel` (t
 2. A `@watchtower` alias in `vite.config.{js,ts}` pointing at `./vendor/phattarachai/watchtower-laravel/resources/js/watchtower`.
 3. `resources/css/watchtower.css`, imported by the page stub: `@import 'tailwindcss' prefix(tw) source(none);`, `@source '../../vendor/phattarachai/watchtower-laravel/resources/js/watchtower/**/*.jsx';` and `@custom-variant dark (&:where(.dark, .dark *));`. Without the `@source`, Tailwind emits none of the module's classes and the console renders unstyled.
 
-The module's colours come from `--wt-*` variables on `.wt-root` — override them to re-skin.
+The module's colours come from `--wt-*` variables on `.wt-root` — override them to re-skin. Writes send the `csrf-token` meta tag's value as `X-CSRF-TOKEN` when the layout has one, and otherwise the `XSRF-TOKEN` cookie as `X-XSRF-TOKEN`, so the React starter kit's layout (no meta tag) needs nothing added. `watchtower:install` also finds that kit's `resources/views/app.blade.php` (any top-level view rendering `@inertia`) when placing `@watchtowerUser`.
 
 ## Smart defaults
 
@@ -324,13 +325,16 @@ Symfony\Component\HttpFoundation\Exception\SuspiciousOperationException
 
 Laravel's HTTP handler already excludes most of these via `$internalDontReport`, but the BeforeSend list is belt-and-braces — it also catches direct `\Sentry\captureException()` calls from queue jobs or console code that bypasses the HTTP handler. Extend per project. Don't subtract unless you actually want validation / auth-fail / 404 noise in the inbox.
 
-**Scrub secrets.** For each event that survives the drop check, the middleware walks `event.request.data`, `event.request.headers`, `event.request.cookies`, and `event.extra`. For each entry whose key (case-insensitive) matches `watchtower.before_send.scrub_keys`, the value becomes the literal string `[Filtered]`. Defaults:
+**Scrub secrets.** For each event that survives the drop check, the middleware walks `event.request.data`, `event.request.headers` and `event.extra`. For each entry whose key (case-insensitive) matches `watchtower.before_send.scrub_keys`, the value becomes the literal string `[Filtered]`. Defaults:
 
 ```
 password, password_confirmation, current_password,
-token, api_key, secret, authorization, cookie,
+token, _token, api_key, secret, authorization, cookie,
+x-csrf-token, x-xsrf-token,
 credit_card, card, cvv, cvc
 ```
+
+`x-csrf-token`, `x-xsrf-token` and `_token` are scrubbed even when a published config predates them. The Sentry SDK filters only `Authorization` and `Cookie` headers, so otherwise the CSRF token that Inertia and axios send on every request would reach the event. Every value in `event.request.cookies` becomes `[Filtered]`; the cookie names are kept.
 
 Then a credit-card-shape regex (`/\b\d(?:[ -]?\d){12,18}\b/`) sweeps the remaining string values and replaces any 13–19-digit number with `[Filtered]`. Intentionally permissive — false positives just redact an innocent number; false negatives leak a real card.
 

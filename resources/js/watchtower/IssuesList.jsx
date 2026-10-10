@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { BUTTON, BUTTON_ACCENT, CARD, INPUT, LevelBadge, StatusPill } from './badges'
+import { BUTTON, BUTTON_ACCENT, CARD, CHECKBOX, INPUT, LevelBadge, StatusPill } from './badges'
 import { CheckIcon, ChevronIcon, SearchIcon, TrashIcon } from './icons'
 import { cx, firstError, formatDateTime, relativeTime, sendJson, withId, withQuery } from './lib'
 
@@ -21,7 +21,6 @@ const SNOOZE_OPTIONS = [
   { minutes: 43200, label: '30 days' },
 ]
 
-const CHECKBOX = 'tw:h-3.5 tw:w-3.5 tw:cursor-pointer tw:accent-[var(--wt-accent)]'
 
 /**
  * The issue inbox: filter bar, one row per group, server-side pagination.
@@ -291,7 +290,10 @@ function IssueRow({ issue, href, checked, onToggle }) {
         <div className="tw:flex tw:shrink-0 tw:items-center tw:gap-4">
           <Metric value={issue.event_count} label="events" />
           <Metric value={issue.user_count} label="users" />
-          <StatusPill status={issue.status} />
+          {/* Fixed width, so "unresolved" and "ignored" leave the metrics in place. */}
+          <div className="tw:flex tw:w-24 tw:justify-end">
+            <StatusPill status={issue.status} />
+          </div>
         </div>
       </a>
     </li>

@@ -65,6 +65,11 @@ return [
 
             'middleware' => ['web'],
 
+            // 'auto' follows the host: dark under a `.dark` ancestor (the
+            // Laravel starter kits set it on <html>), light otherwise.
+            // 'light' or 'dark' pins the UI whatever the host does.
+            'theme' => env('WATCHTOWER_UI_THEME', 'auto'),
+
             // Where a *guest* is sent when the gate says no. A route name
             // (preferred) or a URL; null 403s instead, and so does a
             // signed-in user the gate still rejects.
@@ -107,8 +112,10 @@ return [
             ],
 
             'scrub' => [
-                'header_keys' => ['cookie', 'authorization', 'x-csrf-token', 'x-api-key', 'x-auth-token'],
-                'body_keys' => ['password', 'pwd', 'passwd', 'token', 'secret', 'api_key', 'access_token', 'refresh_token', 'authorization'],
+                // x-csrf-token, x-xsrf-token, _token and the XSRF-TOKEN cookie are
+                // always scrubbed on top of these lists.
+                'header_keys' => ['cookie', 'authorization', 'x-csrf-token', 'x-xsrf-token', 'x-api-key', 'x-auth-token'],
+                'body_keys' => ['password', 'pwd', 'passwd', 'token', '_token', 'secret', 'api_key', 'access_token', 'refresh_token', 'authorization'],
                 'placeholder' => '[Filtered]',
 
                 // Strip row values out of SQL error messages — Laravel's
@@ -176,10 +183,13 @@ return [
 
         // Case-insensitive keys to redact from event.request.data /
         // event.request.headers / event.extra. Values are replaced with
-        // '[Filtered]'. The credit-card-shape regex is always applied on top.
+        // '[Filtered]'. The credit-card-shape regex is always applied on top,
+        // as are x-csrf-token, x-xsrf-token and _token. Cookie values are
+        // always filtered; their names are kept.
         'scrub_keys' => [
             'password', 'password_confirmation', 'current_password',
-            'token', 'api_key', 'secret', 'authorization', 'cookie',
+            'token', '_token', 'api_key', 'secret', 'authorization', 'cookie',
+            'x-csrf-token', 'x-xsrf-token',
             'credit_card', 'card', 'cvv', 'cvc',
         ],
     ],

@@ -10,11 +10,16 @@ import '../../css/watchtower.css'
  * while the module itself is reached through the `@watchtower` Vite alias.
  *
  * Everything Laravel-shaped stops at this file: endpoint URLs arrive as props
- * (no route helpers), and the CSRF token is read from the meta tag.
+ * (no route helpers), and the CSRF token is read from the `csrf-token` meta tag.
+ * A layout without one (the React starter kit's) is fine: the module then sends
+ * the XSRF-TOKEN cookie Laravel sets on every `web` response. `document` is
+ * missing during SSR, so read it only in the browser.
  */
 export default function WatchtowerPage(props) {
   const csrfToken =
-    document.querySelector('meta[name=csrf-token]')?.getAttribute('content') ?? ''
+    typeof document === 'undefined'
+      ? ''
+      : (document.querySelector('meta[name=csrf-token]')?.getAttribute('content') ?? '')
 
   return (
     <>

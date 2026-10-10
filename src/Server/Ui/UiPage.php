@@ -41,6 +41,7 @@ final class UiPage
             'view' => $view,
             'endpoints' => self::endpoints(),
             'brand' => self::brand(),
+            'theme' => self::theme(),
             ...$props,
         ]);
     }
@@ -68,6 +69,16 @@ final class UiPage
             'projectUpdate' => route('watchtower.ui.projects.update', ['project' => $id]),
             'projectRotateKey' => route('watchtower.ui.projects.rotate', ['project' => $id]),
         ];
+    }
+
+    /**
+     * @return 'auto'|'light'|'dark'
+     */
+    public static function theme(): string
+    {
+        $theme = config('watchtower.server.ui.theme', 'auto');
+
+        return in_array($theme, ['light', 'dark'], true) ? $theme : 'auto';
     }
 
     /**

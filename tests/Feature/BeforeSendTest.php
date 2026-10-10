@@ -202,3 +202,34 @@ it('honors a custom scrub_keys config', function (): void {
     expect($data['custom_secret'])->toBe('[Filtered]');
     expect($data['password'])->toBe('leaked-on-purpose');
 });
+
+it('always redacts the CSRF headers and form token, whatever scrub_keys says', function (): void {
+    // A host's published config predates these keys, so they can't rely on it.
+    config(['watchtower.before_send.scrub_keys' => ['password']]);
+    $event = makeRequestEvent([
+        'headers' => [
+            'x-xsrf-token' => ['eyJpdiI6IkxzRmZ'],
+            'X-CSRF-TOKEN' => ['Gk3uX9fHq'],
+            'accept' => ['application/json'],
+        ],
+        'data' => ['_token' => 'Gk3uX9fHq', 'quantity' => 2],
+    ]);
+
+    $request = (new BeforeSend)($event, hintFor(new RuntimeException))->getRequest();
+
+    expect($request['headers']['x-xsrf-token'])->toBe('[Filtered]')
+        ->and($request['headers']['X-CSRF-TOKEN'])->toBe('[Filtered]')
+        ->and($request['headers']['accept'])->toBe(['application/json'])
+        ->and($request['data']['_token'])->toBe('[Filtered]')
+        ->and($request['data']['quantity'])->toBe(2);
+});
+
+it('keeps cookie names but filters every cookie value', function (): void {
+    $event = makeRequestEvent([
+        'cookies' => ['laravel_session' => 'eyJpdiI6Ij', 'XSRF-TOKEN' => 'eyJpdiI6Ik', 'appearance' => 'dark'],
+    ]);
+
+    $cookies = (new BeforeSend)($event, hintFor(new RuntimeException))->getRequest()['cookies'];
+
+    expect($cookies)->toBe(['laravel_session' => '[Filtered]', 'XSRF-TOKEN' => '[Filtered]', 'appearance' => '[Filtered]']);
+});

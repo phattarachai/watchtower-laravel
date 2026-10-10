@@ -39,6 +39,17 @@ use Sentry\Serializer\PayloadSerializer;
 
 class WatchtowerServiceProvider extends ServiceProvider
 {
+    /**
+     * Ingest scrubs these on top of the configured lists, which a host's
+     * published config freezes at install time. See BeforeSend::ALWAYS_SCRUBBED_KEYS.
+     *
+     * @var list<string>
+     */
+    private const array ALWAYS_SCRUBBED_HEADERS = ['x-csrf-token', 'x-xsrf-token'];
+
+    /** @var list<string> */
+    private const array ALWAYS_SCRUBBED_BODY_KEYS = ['_token', 'xsrf-token'];
+
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/watchtower.php', 'watchtower');
@@ -64,8 +75,8 @@ class WatchtowerServiceProvider extends ServiceProvider
     {
         $this->app->bind(EventPipeline::class, fn (): EventPipeline => new EventPipeline(
             new EventScrubber(
-                headerKeys: (array) config('watchtower.server.ingest.scrub.header_keys', []),
-                bodyKeys: (array) config('watchtower.server.ingest.scrub.body_keys', []),
+                headerKeys: [...(array) config('watchtower.server.ingest.scrub.header_keys', []), ...self::ALWAYS_SCRUBBED_HEADERS],
+                bodyKeys: [...(array) config('watchtower.server.ingest.scrub.body_keys', []), ...self::ALWAYS_SCRUBBED_BODY_KEYS],
                 placeholder: (string) config('watchtower.server.ingest.scrub.placeholder', '[Filtered]'),
                 redactSqlValues: (bool) config('watchtower.server.ingest.scrub.redact_sql_values', true),
             ),

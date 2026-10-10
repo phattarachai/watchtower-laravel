@@ -94,3 +94,18 @@ it('paginates at 25 issues per page, newest last-seen first', function (): void 
             ->where('issues.meta.current_page', 2)
             ->etc());
 });
+
+it('hands the configured theme to the UI, falling back to auto', function (?string $configured, string $expected): void {
+    config(['watchtower.server.ui.theme' => $configured]);
+
+    actingAs(wtUser())
+        ->get(route('watchtower.ui.issues'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('theme', $expected));
+})->with([
+    'auto' => ['auto', 'auto'],
+    'light' => ['light', 'light'],
+    'dark' => ['dark', 'dark'],
+    'unknown' => ['sepia', 'auto'],
+    'unset' => [null, 'auto'],
+]);

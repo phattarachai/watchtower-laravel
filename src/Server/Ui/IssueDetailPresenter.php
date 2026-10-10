@@ -10,6 +10,7 @@ use Phattarachai\WatchtowerLaravel\Server\Models\Event;
 use Phattarachai\WatchtowerLaravel\Server\Models\IssueGroup;
 use Phattarachai\WatchtowerLaravel\Server\Support\ClaudeIssuePrompt;
 use Phattarachai\WatchtowerLaravel\Server\Support\EventOrigin;
+use Phattarachai\WatchtowerLaravel\Server\Support\ExceptionChain;
 
 final class IssueDetailPresenter
 {
@@ -88,6 +89,7 @@ final class IssueDetailPresenter
     public static function event(Event $event): array
     {
         $payload = (array) ($event->payload ?? []);
+        $thrown = ExceptionChain::thrown($payload) ?? [];
 
         return [
             'id' => (string) $event->getKey(),
@@ -102,9 +104,10 @@ final class IssueDetailPresenter
             'transaction' => data_get($payload, 'transaction'),
             'server_name' => data_get($payload, 'server_name'),
             'message' => self::message($payload),
-            'exception' => self::exception($payload),
-            'mechanism' => data_get($payload, 'exception.values.0.mechanism'),
-            'stacktrace' => self::listOf(data_get($payload, 'exception.values.0.stacktrace.frames')),
+            'exception' => self::exception($thrown),
+            'mechanism' => $thrown['mechanism'] ?? null,
+            'stacktrace' => self::listOf(data_get($thrown, 'stacktrace.frames')),
+            'causes' => self::causes($payload),
             'request' => self::arrayOrNull(data_get($payload, 'request')),
             'breadcrumbs' => self::breadcrumbs($payload),
             'user' => self::arrayOrNull(data_get($payload, 'user')),
@@ -202,22 +205,37 @@ final class IssueDetailPresenter
     }
 
     /**
-     * @param  array<string, mixed>  $payload
+     * @param  array<string, mixed>  $exception
      * @return array{type: string|null, value: string|null, module: string|null}|null
      */
-    private static function exception(array $payload): ?array
+    private static function exception(array $exception): ?array
     {
-        $first = data_get($payload, 'exception.values.0');
-
-        if (! is_array($first)) {
+        if ($exception === []) {
             return null;
         }
 
         return [
-            'type' => is_string($first['type'] ?? null) ? $first['type'] : null,
-            'value' => is_string($first['value'] ?? null) ? $first['value'] : null,
-            'module' => is_string($first['module'] ?? null) ? $first['module'] : null,
+            'type' => is_string($exception['type'] ?? null) ? $exception['type'] : null,
+            'value' => is_string($exception['value'] ?? null) ? $exception['value'] : null,
+            'module' => is_string($exception['module'] ?? null) ? $exception['module'] : null,
         ];
+    }
+
+    /**
+     * What the thrown exception wraps, nearest cause first.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return list<array{type: string|null, value: string|null, module: string|null, stacktrace: list<array<string, mixed>>}>
+     */
+    private static function causes(array $payload): array
+    {
+        return array_map(
+            fn (array $cause): array => [
+                ...(array) self::exception($cause),
+                'stacktrace' => self::listOf(data_get($cause, 'stacktrace.frames')),
+            ],
+            array_slice(ExceptionChain::outermostFirst($payload), 1),
+        );
     }
 
     /**

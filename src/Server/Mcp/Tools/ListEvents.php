@@ -14,6 +14,7 @@ use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Tool;
 use Phattarachai\WatchtowerLaravel\Server\Mcp\Tools\Concerns\ScopesToProject;
 use Phattarachai\WatchtowerLaravel\Server\Models\Event;
+use Phattarachai\WatchtowerLaravel\Server\Support\ExceptionChain;
 use Phattarachai\WatchtowerLaravel\Support\SinceFilter;
 
 #[Name('list_events')]
@@ -97,7 +98,7 @@ class ListEvents extends Tool
      */
     private function exception(Event $event): ?array
     {
-        $values = data_get($event->payload, 'exception.values.0');
+        $values = ExceptionChain::thrown((array) $event->payload);
 
         if (! is_array($values)) {
             return null;

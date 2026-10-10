@@ -8,10 +8,12 @@ namespace Phattarachai\WatchtowerLaravel\Support;
  * Best-effort scan for root Blade layouts that contain a `<head>` block —
  * candidates for hosting the `<meta name="watchtower-user-*">` tags.
  *
- * Looks in the two conventional locations Laravel apps use:
+ * Looks in the conventional locations Laravel apps use:
  *
  *   - `resources/views/components/layouts/` (modern, anonymous component layouts)
  *   - `resources/views/layouts/`            (legacy `@extends('layouts.app')`)
+ *   - `resources/views/*.blade.php` that render `@inertia` — the Inertia root
+ *     view, e.g. the React and Vue starter kits' `app.blade.php`
  *
  * Filament admin panels do NOT use these layouts — they render through panel
  * providers and need a `renderHook('panels::head.end', …)`. See FilamentPanelDetector.
@@ -35,6 +37,12 @@ final class LayoutDetector
     {
         $matches = [];
 
+        foreach (glob($this->basePath.'/resources/views/*.blade.php') ?: [] as $file) {
+            if ($this->isInertiaRoot($file)) {
+                $matches[] = $this->relative($file);
+            }
+        }
+
         foreach (self::SEARCH_DIRS as $relative) {
             $dir = $this->basePath.DIRECTORY_SEPARATOR.$relative;
 
@@ -50,6 +58,13 @@ final class LayoutDetector
         }
 
         return $matches;
+    }
+
+    private function isInertiaRoot(string $absolutePath): bool
+    {
+        $contents = @file_get_contents($absolutePath);
+
+        return is_string($contents) && str_contains($contents, '<head') && preg_match('/@inertia\b(?!Head)/', $contents) === 1;
     }
 
     private function hasHead(string $absolutePath): bool

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { BUTTON, BUTTON_ACCENT, CARD, Chip, INPUT, LABEL } from './badges'
+import { BUTTON, BUTTON_ACCENT, CARD, CHECKBOX, Chip, INPUT, LABEL } from './badges'
 import { CloseIcon, SendIcon, TrashIcon } from './icons'
 import { cx, firstError, sendJson, withId } from './lib'
 
@@ -90,7 +90,7 @@ export function AlertRules({ rules, projects, options, endpoints, csrfToken }) {
       )}
 
       <div className="tw:grid tw:gap-4 tw:lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className={cx(CARD, 'tw:overflow-hidden')}>
+        <div className={cx(CARD, 'tw:h-fit tw:overflow-hidden')}>
           {items.length === 0 ? (
             <p className="tw:px-4 tw:py-10 tw:text-center tw:text-xs tw:text-[var(--wt-text-muted)]">
               No alert rules yet.
@@ -320,6 +320,7 @@ function RuleForm({ draft, projects, options, endpoints, csrfToken, onClose, onS
         <label className="tw:flex tw:items-center tw:gap-2 tw:text-xs tw:text-[var(--wt-text)]">
           <input
             type="checkbox"
+            className={CHECKBOX}
             checked={Boolean(form.is_active)}
             onChange={(event) => set('is_active', event.target.checked)}
           />

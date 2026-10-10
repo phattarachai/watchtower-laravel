@@ -32,14 +32,21 @@ final class ProjectPresenter
     public static function detail(Project $project): array
     {
         $dsn = $project->buildDsn((string) config('app.url', 'http://localhost'));
+        $key = (string) $project->public_key;
+        $masked = self::mask($key);
+        $hide = fn (string $text): string => $key === '' ? $text : str_replace($key, $masked, $text);
 
         return [
             ...self::option($project),
-            'public_key' => (string) $project->public_key,
-            'masked_key' => self::mask((string) $project->public_key),
+            'public_key' => $key,
+            'masked_key' => $masked,
             'retention_days' => $project->retention_days,
             'dsn' => $dsn,
-            'snippets' => InstallSnippets::for($project, $dsn),
+            'masked_dsn' => $hide($dsn),
+            'snippets' => array_map(
+                fn (array $snippet): array => [...$snippet, 'masked_code' => $hide($snippet['code'])],
+                InstallSnippets::for($project, $dsn),
+            ),
         ];
     }
 

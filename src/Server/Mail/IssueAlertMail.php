@@ -18,6 +18,7 @@ use Phattarachai\WatchtowerCore\Alerts\EventSnapshot;
 use Phattarachai\WatchtowerCore\Alerts\IssueSnapshot;
 use Phattarachai\WatchtowerCore\Alerts\RuleSpec;
 use Phattarachai\WatchtowerLaravel\Server\Models\Project;
+use Phattarachai\WatchtowerLaravel\Server\Support\ExceptionChain;
 
 class IssueAlertMail extends Mailable implements ShouldQueue
 {
@@ -103,7 +104,7 @@ class IssueAlertMail extends Mailable implements ShouldQueue
      */
     private function topFrame(): ?array
     {
-        $frames = $this->event->payload['exception']['values'][0]['stacktrace']['frames'] ?? null;
+        $frames = ExceptionChain::thrown((array) $this->event->payload)['stacktrace']['frames'] ?? null;
 
         if (! is_array($frames)) {
             return null;

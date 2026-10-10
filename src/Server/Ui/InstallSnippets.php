@@ -53,7 +53,7 @@ final class InstallSnippets
         WATCHTOWER_DSN={$dsn}
         SENTRY_LARAVEL_DSN={$dsn}
         SENTRY_TRACES_SAMPLE_RATE=0
-        SENTRY_SEND_DEFAULT_PII=true
+        SENTRY_SEND_DEFAULT_PII=false
         INI;
     }
 

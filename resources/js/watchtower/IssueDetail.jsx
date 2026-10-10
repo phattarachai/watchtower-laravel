@@ -8,6 +8,7 @@ import {
   firstError,
   flattenPairs,
   formatDateTime,
+  frameLocation,
   isVendorFrame,
   relativeTime,
   sendJson,
@@ -243,35 +244,49 @@ function TabBody({ tab, event }) {
 }
 
 function Stacktrace({ event }) {
-  const frames = useMemo(() => [...(event.stacktrace ?? [])].reverse(), [event])
+  const causes = Array.isArray(event.causes) ? event.causes : []
+
+  return (
+    <div className="tw:flex tw:flex-col">
+      <ExceptionTrace exception={event.exception} frames={event.stacktrace} />
+      {causes.map((cause, index) => (
+        <div key={index} className="tw:border-t-4 tw:border-[var(--wt-border)]">
+          <ExceptionTrace exception={cause} frames={cause.stacktrace} causedBy />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * One exception of the chain. Sentry orders the chain oldest-first; the server
+ * already hands over the thrown one as `event.exception` and its causes after.
+ */
+function ExceptionTrace({ exception, frames: rawFrames, causedBy = false }) {
+  const frames = useMemo(() => [...(rawFrames ?? [])].reverse(), [rawFrames])
   const [showVendor, setShowVendor] = useState(false)
 
   const appFrames = frames.filter((frame) => !isVendorFrame(frame))
   const visible = showVendor || appFrames.length === 0 ? frames : appFrames
   const hidden = frames.length - visible.length
 
-  if (frames.length === 0) {
-    return (
-      <div className="tw:p-4">
-        {event.exception?.value ? (
-          <p className="tw:text-xs tw:text-[var(--wt-text)]">{event.exception.value}</p>
-        ) : (
-          <Empty>No stacktrace in this event.</Empty>
-        )}
-      </div>
-    )
-  }
-
   return (
     <div className="tw:flex tw:flex-col">
-      {event.exception && (
+      {exception && (
         <div className="tw:border-b tw:border-[var(--wt-border)] tw:px-4 tw:py-3">
-          <div className="tw:font-semibold tw:text-[var(--wt-text)]">{event.exception.type}</div>
+          {causedBy && (
+            <div className="tw:mb-0.5 tw:text-[10px] tw:font-semibold tw:tracking-wide tw:text-[var(--wt-text-faint)] tw:uppercase">
+              Caused by
+            </div>
+          )}
+          <div className="tw:font-semibold tw:break-words tw:text-[var(--wt-text)]">{exception.type}</div>
           <div className="tw:mt-0.5 tw:text-xs tw:break-words tw:text-[var(--wt-text-muted)]">
-            {event.exception.value}
+            {exception.value}
           </div>
         </div>
       )}
+
+      {frames.length === 0 && !causedBy && !exception?.value && <Empty>No stacktrace in this event.</Empty>}
 
       {hidden > 0 && (
         <button
@@ -283,11 +298,17 @@ function Stacktrace({ event }) {
         </button>
       )}
 
-      <ul className="tw:divide-y tw:divide-[var(--wt-border)]">
-        {visible.map((frame, index) => (
-          <Frame key={`${frame.filename ?? index}-${index}`} frame={frame} defaultOpen={index === 0} />
-        ))}
-      </ul>
+      {visible.length > 0 && (
+        <ul className="tw:divide-y tw:divide-[var(--wt-border)]">
+          {visible.map((frame, index) => (
+            <Frame
+              key={`${frame.filename ?? index}-${index}`}
+              frame={frame}
+              defaultOpen={index === 0 && !causedBy}
+            />
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
@@ -323,8 +344,8 @@ function Frame({ frame, defaultOpen }) {
         >
           {shortenPath(file)}
         </span>
-        {frame.lineno !== undefined && (
-          <span className="wt-code tw:shrink-0 tw:text-[var(--wt-text-faint)]">:{frame.lineno}</span>
+        {frameLocation(frame) && (
+          <span className="wt-code tw:shrink-0 tw:text-[var(--wt-text-faint)]">{frameLocation(frame)}</span>
         )}
         {frame.function && (
           <span className="wt-code tw:ml-auto tw:truncate tw:text-[var(--wt-text-muted)]">
