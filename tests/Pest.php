@@ -9,18 +9,22 @@ use Phattarachai\WatchtowerLaravel\Server\Models\Event;
 use Phattarachai\WatchtowerLaravel\Server\Models\IssueGroup;
 use Phattarachai\WatchtowerLaravel\Server\Models\Project;
 use Phattarachai\WatchtowerLaravel\Tests\Fixtures\WtUser;
+use Phattarachai\WatchtowerLaravel\Tests\RelayWithoutInertiaTestCase;
 use Phattarachai\WatchtowerLaravel\Tests\SelfCaptureLoopbackTestCase;
 use Phattarachai\WatchtowerLaravel\Tests\SelfCaptureTestCase;
 use Phattarachai\WatchtowerLaravel\Tests\ServerTestCase;
 use Phattarachai\WatchtowerLaravel\Tests\Support\SentryEnvelope;
 use Phattarachai\WatchtowerLaravel\Tests\TestCase;
 use Phattarachai\WatchtowerLaravel\Tests\UiTestCase;
+use Phattarachai\WatchtowerLaravel\Tests\WithoutInertiaTestCase;
 
 uses(TestCase::class)->in('Feature', 'Unit');
 uses(ServerTestCase::class, RefreshDatabase::class)->in('Server');
 uses(UiTestCase::class, RefreshDatabase::class)->in('Ui');
 uses(SelfCaptureTestCase::class, RefreshDatabase::class)->in('SelfCapture');
 uses(SelfCaptureLoopbackTestCase::class, RefreshDatabase::class)->in('SelfCaptureLoopback');
+uses(WithoutInertiaTestCase::class, RefreshDatabase::class)->in('WithoutInertia');
+uses(RelayWithoutInertiaTestCase::class)->in('RelayWithoutInertia');
 
 /**
  * @param  array<string, mixed>  $attributes

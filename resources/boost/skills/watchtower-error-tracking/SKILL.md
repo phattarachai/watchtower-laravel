@@ -1,7 +1,7 @@
 ---
 name: watchtower-error-tracking
 description: "Wire up Watchtower (a self-hosted, Sentry-compatible exception tracker) into a Laravel or browser app, and connect Claude Code to its MCP server for in-conversation issue triage. Triggers on \"Watchtower\", \"set up error tracking\", \"verify the exception was reported\", WATCHTOWER_DSN, SENTRY_LARAVEL_DSN, or VITE_SENTRY_DSN."
-version: 2026.09.30.2
+version: 2026.10.10.1
 ---
 
 # Watchtower error tracking
@@ -27,8 +27,10 @@ Config lives in `config/watchtower.php`; every default above is opt-out via env 
 | Mode | Choose it when | What you get |
 |---|---|---|
 | `relay` (default) | There's a central Watchtower and this app is one of several reporting to it. | Everything in the list above. No tables, no UI. |
-| `standalone` | One app, no second host to run, or the errors must not leave this machine. Also the right answer when the app has child services (a WordPress site, a Next.js frontend) that need somewhere to report. | Own `watchtower_*` tables, ingest endpoint, Inertia console at `/{prefix}`, alert emails, MCP server. |
+| `standalone` | One app, no second host to run, or the errors must not leave this machine. Also the right answer when the app has child services (a WordPress site, a Next.js frontend) that need somewhere to report. | Own `watchtower_*` tables, ingest endpoint, Inertia console at `/{prefix}` (Inertia + React hosts only), alert emails, MCP server. |
 | `dual` | Browser errors should keep flowing to the central fleet inbox, but server-side detail stays local. | Both — but note the asymmetry below. |
+
+Relay and dual need a central Watchtower server. In the commands below, `<watchtower-host>` is that server's host: the part after `@` in `WATCHTOWER_DSN`. The browser relay forwards to `/api/watchtower-relay` on it, an endpoint only a Watchtower server has, so a relay DSN can't point at sentry.io.
 
 > **Dual is not a mirror.** Browser envelopes are stored locally *and* forwarded upstream; this app's own backend exceptions land only in the local store, because the install points `SENTRY_LARAVEL_DSN` at the local project.
 
@@ -41,7 +43,7 @@ npm run build
 php artisan watchtower:doctor
 ```
 
-`--standalone` runs the relay steps (env keys, `bootstrap/app.php` patch, config publish, frontend wiring) *plus*: writes `WATCHTOWER_MODE`, migrates six `watchtower_*` tables, creates the first project and points `SENTRY_LARAVEL_DSN` at its local DSN, publishes `resources/js/pages/Watchtower.jsx`, patches the host's `vite.config` and `app.css`, and registers the local MCP server.
+`--standalone` runs the relay steps (env keys, `bootstrap/app.php` patch, config publish, frontend wiring) *plus*: writes `WATCHTOWER_MODE`, migrates six `watchtower_*` tables, creates the first project and points `SENTRY_LARAVEL_DSN` at its local DSN, and registers the local MCP server. When `inertiajs/inertia-laravel` is installed it also publishes `resources/js/pages/Watchtower.jsx` (`.tsx` in a TypeScript host), adds the `@watchtower` alias to `vite.config` and writes `resources/css/watchtower.css`; without Inertia it skips those files and says how to add the UI later.
 
 Then do the one thing it can't: **grant access to the console.** It's wide open in `local` and 403 everywhere else until you register a check.
 
@@ -54,7 +56,7 @@ Watchtower::auth(fn ($request): bool => $request->user()?->isAdmin() === true);
 
 `watchtower:doctor` is the verification step here, not `watchtower:test` — it checks tables, routes, the published page, the Vite alias, the two Tailwind lines, an active project, and that self-capture is actually bound. Treat every failure as real; the advisories (mailer, queue driver, `laravel/mcp` missing) are informational.
 
-Host requirements: **Inertia + React** with an `import.meta.glob` over `resources/js/pages`, and a **Tailwind v4** entry stylesheet — the install adds `@import 'tailwindcss' prefix(tw);` and an `@source` line pointing into the package. Set `WATCHTOWER_UI_ENABLED=false` for a headless install (ingest + alerts + MCP, no console) if the host has neither. No Redis is needed; the `sync` queue works.
+Requirements: PHP 8.4+, Laravel 12 or 13. The console additionally needs **`inertiajs/inertia-laravel`** (suggested, not required by the package) on an **Inertia + React** host with an `import.meta.glob` over `resources/js/pages`, plus **Tailwind v4** via Vite. The install writes a separate `resources/css/watchtower.css` (`@import 'tailwindcss' prefix(tw) source(none);` plus an `@source` line into the package) that the page imports, so the host's own Tailwind setup is untouched. **Livewire, Filament or Blade hosts** run headless: set `WATCHTOWER_UI_ENABLED=false` and they keep ingest, self-capture, alerts and MCP; only the console page is missing. `watchtower:doctor` fails while the UI is enabled without Inertia and names the fix. No Redis is needed; the `sync` queue works.
 
 Manage projects without the browser: `php artisan watchtower:project {list|create|rotate-key|activate|deactivate}`. `list` prints each project's key and DSN.
 
@@ -102,7 +104,7 @@ leaving the terminal — no clicking through the UI. This needs a **Personal Acc
 ```bash
 PAT=$(cat ~/.watchtower/token 2>/dev/null)
 if [ -n "$PAT" ]; then
-  DSN=$(curl -fsS -X POST https://watchtower.phattarachai.app/api/v1/projects \
+  DSN=$(curl -fsS -X POST https://<watchtower-host>/api/v1/projects \
     -H "Authorization: Bearer $PAT" -H 'Content-Type: application/json' \
     -d '{"name":"<App Name>","slug":"<slug>","platform":"php-laravel"}' \
     | jq -r '.data.dsn')
@@ -170,7 +172,7 @@ EVENT_ID=$(php artisan tinker --execute 'echo \Sentry\captureMessage("watchtower
 PUBLIC_KEY=$(grep -oE '://[a-z0-9]+@' .env | head -1 | tr -d ':/@')   # extract from SENTRY_LARAVEL_DSN
 
 curl -fsSL -H "Authorization: Bearer $PUBLIC_KEY" \
-  https://watchtower.phattarachai.app/api/v1/events/$EVENT_ID
+  https://<watchtower-host>/api/v1/events/$EVENT_ID
 ```
 
 200 → ingested. 404 → not received yet (the queue is async; retry after a few seconds). Full endpoint list in `reference.md` § "Querying via REST".
@@ -182,7 +184,7 @@ Watchtower exposes an MCP server at `/mcp` so Claude can query and triage issues
 `watchtower:install` registers it automatically when the `claude` CLI is on PATH, using `--scope project` so the config lands in a committed `.mcp.json` at the repo root — teammates who `composer install` get the MCP on pull (after approving it once) without re-running the installer. Manual registration:
 
 ```bash
-claude mcp add --transport http --scope project watchtower https://watchtower.phattarachai.app/mcp \
+claude mcp add --transport http --scope project watchtower https://<watchtower-host>/mcp \
   --header "Authorization: Bearer <PUBLIC_KEY>"
 ```
 

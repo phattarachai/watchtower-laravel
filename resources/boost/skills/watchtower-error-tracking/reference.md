@@ -14,7 +14,7 @@ Self-hosted, Sentry-compatible exception tracker. Client apps report errors thro
 
 ## Pick the right Watchtower project for this codebase
 
-Default: **one Watchtower project per client app**. The same DSN authenticates the Laravel backend (`SENTRY_LARAVEL_DSN`) and the browser frontend (`VITE_SENTRY_DSN`). `watchtower:install` writes both env keys to that DSN. Backend exceptions and JS errors share one inbox; project name in the breadcrumb tells them apart at triage time. Create the project once at `https://watchtower.phattarachai.app/projects/create`, pick the primary runtime (usually `php-laravel`) as `platform`, copy the DSN.
+Default: **one Watchtower project per client app**. The same DSN authenticates the Laravel backend (`SENTRY_LARAVEL_DSN`) and the browser frontend (`VITE_SENTRY_DSN`). `watchtower:install` writes both env keys to that DSN. Backend exceptions and JS errors share one inbox; project name in the breadcrumb tells them apart at triage time. On a central server (relay mode; `<watchtower-host>` is the host in `WATCHTOWER_DSN`), create the project once at `https://<watchtower-host>/projects/create`, pick the primary runtime (usually `php-laravel`) as `platform`, copy the DSN.
 
 ### When to split into two projects
 
@@ -127,7 +127,7 @@ Two more knobs live in `config/watchtower.php` only (arrays — too much for an 
 
 ### What standalone/dual adds
 
-Six `watchtower_*` tables (json columns — SQLite, MySQL and Postgres all work), an ingest endpoint at `POST /{prefix}/api/{project}/envelope`, an Inertia + React console at `/{prefix}`, per-project alert-rule email, and an MCP server at `/{prefix}/mcp`. `ProcessEventJob` does the same scrub → normalize → fingerprint → group-upsert pipeline as the central server.
+Six `watchtower_*` tables (json columns — SQLite, MySQL and Postgres all work), an ingest endpoint at `POST /{prefix}/api/{project}/envelope`, an Inertia + React console at `/{prefix}` (mounted only when `inertiajs/inertia-laravel` is installed and `WATCHTOWER_UI_ENABLED` is true), per-project alert-rule email, and an MCP server at `/{prefix}/mcp`. `ProcessEventJob` does the same scrub → normalize → fingerprint → group-upsert pipeline as the central server.
 
 This app's own exceptions reach the store through `watchtower.server.self_capture`:
 
@@ -273,11 +273,11 @@ The runaway usually shows as one or two issue groups with tens of thousands of e
 
 ### Host build requirements
 
-The console is an Inertia page. `watchtower:install` handles all three, but they're what a manual wire-up must reproduce:
+The console is an Inertia page, so the host needs `inertiajs/inertia-laravel` (the package only suggests it), `@inertiajs/react` and React. Without it the UI routes are not registered, `watchtower:install` skips the files below, and `watchtower:doctor` fails until you install it or set `WATCHTOWER_UI_ENABLED=false`. With it, `watchtower:install` handles all three, but they're what a manual wire-up must reproduce:
 
 1. `resources/js/pages/Watchtower.jsx` published into the host (the host's `import.meta.glob` never leaves `./pages`).
 2. A `@watchtower` alias in `vite.config.{js,ts}` pointing at `./vendor/phattarachai/watchtower-laravel/resources/js/watchtower`.
-3. In the Tailwind v4 entry stylesheet: `@import 'tailwindcss' prefix(tw);` and `@source '../../vendor/phattarachai/watchtower-laravel/resources/js/watchtower/**/*.jsx';`. Without the `@source`, Tailwind emits none of the module's classes and the console renders unstyled.
+3. `resources/css/watchtower.css`, imported by the page stub: `@import 'tailwindcss' prefix(tw) source(none);`, `@source '../../vendor/phattarachai/watchtower-laravel/resources/js/watchtower/**/*.jsx';` and `@custom-variant dark (&:where(.dark, .dark *));`. Without the `@source`, Tailwind emits none of the module's classes and the console renders unstyled.
 
 The module's colours come from `--wt-*` variables on `.wt-root` — override them to re-skin.
 
@@ -487,11 +487,11 @@ Sentry.init({
 
 ### Cross-origin (your own server forwards)
 
-Most cases. You need a tiny relay endpoint in whatever runtime hosts the JS. The job: receive POST `/api/watchtower-relay`, forward the raw body and `Content-Type` / `Content-Encoding` headers to `https://watchtower.phattarachai.app/api/watchtower-relay`, return the upstream response verbatim. ~20 lines in any runtime. Express example:
+Most cases. You need a tiny relay endpoint in whatever runtime hosts the JS. The job: receive POST `/api/watchtower-relay`, forward the raw body and `Content-Type` / `Content-Encoding` headers to `https://<watchtower-host>/api/watchtower-relay`, return the upstream response verbatim. ~20 lines in any runtime. Express example:
 
 ```javascript
 app.post('/api/watchtower-relay', express.raw({ type: '*/*', limit: '1mb' }), async (req, res) => {
-    const upstream = await fetch('https://watchtower.phattarachai.app/api/watchtower-relay', {
+    const upstream = await fetch('https://<watchtower-host>/api/watchtower-relay', {
         method: 'POST',
         headers: {
             'Content-Type': req.get('Content-Type') ?? 'application/octet-stream',
@@ -536,7 +536,7 @@ For Laravel 10, register in `app/Exceptions/Handler.php` instead — see the sen
 ### 3. Publish config + set the DSN
 
 ```bash
-php artisan sentry:publish --dsn=https://YOUR_PUBLIC_KEY@watchtower.phattarachai.app/NUMERIC_PROJECT_ID
+php artisan sentry:publish --dsn=https://YOUR_PUBLIC_KEY@<watchtower-host>/NUMERIC_PROJECT_ID
 ```
 
 ### 4. (Optional) Browser tunnel
@@ -546,7 +546,7 @@ If you also serve browser JS from this app and want ad-blocker-safe reporting, y
 ```php
 // routes/api.php
 Route::post('/watchtower-relay', function (\Illuminate\Http\Request $request) {
-    $upstream = (string) env('WATCHTOWER_RELAY_UPSTREAM', 'https://watchtower.phattarachai.app/api/watchtower-relay');
+    $upstream = (string) env('WATCHTOWER_RELAY_UPSTREAM', 'https://<watchtower-host>/api/watchtower-relay');
     $response = \Illuminate\Support\Facades\Http::withHeaders(array_filter([
         'Content-Type' => $request->header('Content-Type'),
         'Content-Encoding' => $request->header('Content-Encoding'),
@@ -595,14 +595,14 @@ Verify a specific exception arrived:
 
 ```bash
 curl -fsSL -H "Authorization: Bearer $PUBLIC_KEY" \
-  https://watchtower.phattarachai.app/api/v1/events/$EVENT_ID
+  https://<watchtower-host>/api/v1/events/$EVENT_ID
 ```
 
 List unresolved errors in production from the last 24h:
 
 ```bash
 curl -fsSL -H "Authorization: Bearer $PUBLIC_KEY" \
-  "https://watchtower.phattarachai.app/api/v1/issues?status=unresolved&environment=production&level=error&since=24h"
+  "https://<watchtower-host>/api/v1/issues?status=unresolved&environment=production&level=error&since=24h"
 ```
 
 Resolve an issue:
@@ -611,7 +611,7 @@ Resolve an issue:
 curl -fsSL -X PATCH -H "Authorization: Bearer $PUBLIC_KEY" \
   -H "Content-Type: application/json" \
   -d '{"status":"resolved"}' \
-  https://watchtower.phattarachai.app/api/v1/issues/39
+  https://<watchtower-host>/api/v1/issues/39
 ```
 
 Snooze for 24h:
@@ -620,7 +620,7 @@ Snooze for 24h:
 curl -fsSL -X PATCH -H "Authorization: Bearer $PUBLIC_KEY" \
   -H "Content-Type: application/json" \
   -d '{"status":"snoozed","snooze_duration":"24h"}' \
-  https://watchtower.phattarachai.app/api/v1/issues/39
+  https://<watchtower-host>/api/v1/issues/39
 ```
 
 Valid `snooze_duration` values: `1h`, `24h`, `7d`, `30d`, `until_event`.
@@ -636,7 +636,7 @@ Watchtower exposes a Model Context Protocol server at `/mcp` for Claude Code (an
 `php artisan watchtower:install` registers the MCP server with Claude Code automatically when the `claude` CLI is on PATH (use `--no-mcp` to skip). It registers with `--scope project`, so the server is written to a committed `.mcp.json` at the repo root rather than the per-machine local config — anyone who pulls the project and runs `composer install` gets the MCP after a one-time approval prompt, without re-running the installer. To register manually after the fact:
 
 ```bash
-claude mcp add --transport http --scope project watchtower https://watchtower.phattarachai.app/mcp \
+claude mcp add --transport http --scope project watchtower https://<watchtower-host>/mcp \
   --header "Authorization: Bearer <PUBLIC_KEY>"
 ```
 

@@ -9,6 +9,17 @@ This file records anything released before that automation landed.
 
 ## Upgrade notes
 
+### 1.4.0
+
+- `inertiajs/inertia-laravel` moved from `require` to `suggest`, so relay-only and headless Livewire, Filament or Blade
+  apps no longer install it. Nothing that worked stops working, but if your app uses the standalone issue UI and never
+  required Inertia itself (it only came in through this package), run `composer require inertiajs/inertia-laravel`
+  before your next `composer update`. Without it the UI routes aren't registered, and `watchtower:doctor` says so.
+- `watchtower:install --standalone` without Inertia skips the page stub, Vite alias and `watchtower.css`, and says how
+  to add the UI later.
+- `watchtower:doctor` treats `WATCHTOWER_UI_ENABLED=false` as a headless install (advisory, not a failure) and skips
+  the page, alias and Tailwind checks for it.
+
 ### 1.3.0
 
 - Requires `phattarachai/watchtower-core` ^1.1 — the event pipeline (scrub → normalize → trim) and the gzip inflate cap now

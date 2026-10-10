@@ -17,8 +17,20 @@ final class UiPage
 {
     public const string COMPONENT = 'Watchtower';
 
+    /**
+     * inertiajs/inertia-laravel is suggested, not required, so a relay-only
+     * Livewire, Filament or Blade host never has to install it. Tests point
+     * this at a missing class to stand in for such a host.
+     */
+    public static string $inertiaClass = 'Inertia\Inertia';
+
     /** Stand-in the JS swaps for a real id — see `withId()` in the module. */
     public const string ID_PLACEHOLDER = '__ID__';
+
+    public static function available(): bool
+    {
+        return class_exists(self::$inertiaClass);
+    }
 
     /**
      * @param  array<string, mixed>  $props

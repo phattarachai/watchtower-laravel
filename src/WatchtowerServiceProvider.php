@@ -31,6 +31,7 @@ use Phattarachai\WatchtowerLaravel\Server\Ingest\IngestThrottle;
 use Phattarachai\WatchtowerLaravel\Server\Ingest\QueueBackpressure;
 use Phattarachai\WatchtowerLaravel\Server\Mcp\McpRegistrar;
 use Phattarachai\WatchtowerLaravel\Server\Sentry\LocalTransport;
+use Phattarachai\WatchtowerLaravel\Server\Ui\UiPage;
 use Phattarachai\WatchtowerLaravel\Support\EnvelopeForwarder;
 use Sentry\ClientBuilder;
 use Sentry\SentrySdk;
@@ -177,7 +178,7 @@ class WatchtowerServiceProvider extends ServiceProvider
             McpRegistrar::register();
         }
 
-        if (config('watchtower.server.ui.enabled', true)) {
+        if (config('watchtower.server.ui.enabled', true) && UiPage::available()) {
             $this->registerUiRoutes();
         }
     }
@@ -190,7 +191,8 @@ class WatchtowerServiceProvider extends ServiceProvider
     }
 
     /**
-     * The embedded Inertia UI. AuthorizeUi is force-appended here so it cannot
+     * The embedded Inertia UI, mounted only when the host has
+     * inertiajs/inertia-laravel installed. AuthorizeUi is force-appended here so it cannot
      * be dropped by editing `watchtower.server.ui.middleware`.
      */
     private function registerUiRoutes(): void
