@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Phattarachai\WatchtowerLaravel;
 
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Contracts\Foundation\CachesConfiguration;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Route;
@@ -32,6 +33,7 @@ use Phattarachai\WatchtowerLaravel\Server\Ingest\QueueBackpressure;
 use Phattarachai\WatchtowerLaravel\Server\Mcp\McpRegistrar;
 use Phattarachai\WatchtowerLaravel\Server\Sentry\LocalTransport;
 use Phattarachai\WatchtowerLaravel\Server\Ui\UiPage;
+use Phattarachai\WatchtowerLaravel\Support\EmbeddedUiPatcher;
 use Phattarachai\WatchtowerLaravel\Support\EnvelopeForwarder;
 use Sentry\ClientBuilder;
 use Sentry\SentrySdk;
@@ -52,7 +54,7 @@ class WatchtowerServiceProvider extends ServiceProvider
 
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__.'/../config/watchtower.php', 'watchtower');
+        $this->mergeConfigRecursivelyFrom(__DIR__.'/../config/watchtower.php', 'watchtower');
 
         $this->app->singleton(BeforeSend::class);
         $this->app->singleton(SelfCaptureGuard::class);
@@ -65,6 +67,51 @@ class WatchtowerServiceProvider extends ServiceProvider
 
         $this->registerEventPipeline();
         $this->registerSelfCaptureTransport();
+    }
+
+    /**
+     * A host's published config is frozen at publish time, and Laravel's
+     * mergeConfigFrom only fills missing *top-level* keys — so a key added
+     * under `server` (1.5's `server.ui.theme`) never appeared for a host whose
+     * `server` block came from an older release. Running here, before
+     * config:cache writes its file, puts the filled keys in the cache too.
+     */
+    private function mergeConfigRecursivelyFrom(string $path, string $key): void
+    {
+        if ($this->app instanceof CachesConfiguration && $this->app->configurationIsCached()) {
+            return;
+        }
+
+        $config = $this->app->make('config');
+
+        $config->set($key, self::fillMissingKeys(require $path, (array) $config->get($key, [])));
+    }
+
+    /**
+     * Every key the host's config lacks, at any depth, is taken from the
+     * defaults. A list (scrub keys, ignored exceptions, middleware) is the
+     * host's as published: merging it by index would bring back entries the
+     * host removed.
+     *
+     * @param  array<array-key, mixed>  $defaults
+     * @param  array<array-key, mixed>  $published
+     * @return array<array-key, mixed>
+     */
+    private static function fillMissingKeys(array $defaults, array $published): array
+    {
+        foreach ($defaults as $key => $default) {
+            if (! array_key_exists($key, $published)) {
+                $published[$key] = $default;
+
+                continue;
+            }
+
+            if (is_array($default) && ! array_is_list($default) && is_array($published[$key])) {
+                $published[$key] = self::fillMissingKeys($default, $published[$key]);
+            }
+        }
+
+        return $published;
     }
 
     /**
@@ -135,8 +182,12 @@ class WatchtowerServiceProvider extends ServiceProvider
         // Only the page needs to live in the host tree — `app.jsx`'s
         // import.meta.glob never leaves ./pages. The module itself is reached
         // through the `@watchtower` Vite alias, so there is no second copy.
+        // A TypeScript host resolves only `.tsx` pages, so a `.jsx` re-publish
+        // there would sit beside the stale `.tsx` and never load.
+        $pageExtension = $this->app->runningInConsole() ? EmbeddedUiPatcher::pageExtension(base_path()) : 'jsx';
+
         $this->publishes([
-            __DIR__.'/../resources/js/pages/Watchtower.jsx' => resource_path('js/pages/Watchtower.jsx'),
+            __DIR__.'/../resources/js/pages/Watchtower.jsx' => resource_path("js/pages/Watchtower.{$pageExtension}"),
         ], 'watchtower-inertia');
 
         $this->loadViewsFrom(__DIR__.'/../resources/views', 'watchtower');

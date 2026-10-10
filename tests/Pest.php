@@ -9,6 +9,7 @@ use Phattarachai\WatchtowerLaravel\Server\Models\Event;
 use Phattarachai\WatchtowerLaravel\Server\Models\IssueGroup;
 use Phattarachai\WatchtowerLaravel\Server\Models\Project;
 use Phattarachai\WatchtowerLaravel\Tests\Fixtures\WtUser;
+use Phattarachai\WatchtowerLaravel\Tests\LegacyConfigTestCase;
 use Phattarachai\WatchtowerLaravel\Tests\RelayWithoutInertiaTestCase;
 use Phattarachai\WatchtowerLaravel\Tests\SelfCaptureLoopbackTestCase;
 use Phattarachai\WatchtowerLaravel\Tests\SelfCaptureTestCase;
@@ -25,6 +26,7 @@ uses(SelfCaptureTestCase::class, RefreshDatabase::class)->in('SelfCapture');
 uses(SelfCaptureLoopbackTestCase::class, RefreshDatabase::class)->in('SelfCaptureLoopback');
 uses(WithoutInertiaTestCase::class, RefreshDatabase::class)->in('WithoutInertia');
 uses(RelayWithoutInertiaTestCase::class)->in('RelayWithoutInertia');
+uses(LegacyConfigTestCase::class)->in('LegacyConfig');
 
 /**
  * @param  array<string, mixed>  $attributes

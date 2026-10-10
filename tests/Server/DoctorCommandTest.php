@@ -20,6 +20,7 @@ afterEach(function (): void {
     @unlink(resource_path('css/app.css'));
     @unlink(resource_path('css/watchtower.css'));
     @unlink(resource_path('js/pages/Watchtower.jsx'));
+    @unlink(resource_path('js/pages/Watchtower.tsx'));
     @rmdir(resource_path('css'));
     @rmdir(resource_path('js/pages'));
     @rmdir(resource_path('js'));
@@ -61,6 +62,16 @@ it('flags a missing Inertia page stub', function (): void {
     $this->artisan('watchtower:doctor')
         ->expectsOutputToContain('vendor:publish --tag=watchtower-inertia')
         ->assertExitCode(1);
+});
+
+it('names the stray .jsx page a pre-1.5.1 publish left beside the .tsx one', function (): void {
+    config()->set('watchtower.server.self_capture', 'loopback');
+    wireDoctorFixture();
+    file_put_contents(resource_path('js/pages/Watchtower.tsx'), "export default function Watchtower() {}\n");
+
+    $this->artisan('watchtower:doctor')
+        ->expectsOutputToContain('Watchtower.jsx is a stray copy')
+        ->assertExitCode(0);
 });
 
 it('flags a missing @watchtower Vite alias', function (): void {

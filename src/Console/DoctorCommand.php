@@ -129,13 +129,29 @@ final class DoctorCommand extends Command
 
         $failures += $this->check('Inertia page published', fn (): ?string => EmbeddedUiPatcher::publishedPagePath(base_path()) !== null
             ? null
-            : 'Re-run `watchtower:install --standalone`, or publish the stub with `vendor:publish --tag=watchtower-inertia` (rename to .tsx for a TypeScript host).');
+            : 'Re-run `watchtower:install --standalone`, or publish the stub with `vendor:publish --tag=watchtower-inertia`.');
+
+        $this->strayPageAdvisory();
 
         $failures += $this->check('Vite alias @watchtower', fn (): ?string => $this->anyViteConfigHasAlias()
             ? null
             : 'Add a resolve.alias entry for @watchtower to vite.config.js — see the package README.');
 
         return $failures + $this->checkTailwind();
+    }
+
+    /**
+     * Before 1.5.1, `vendor:publish --tag=watchtower-inertia` always wrote
+     * Watchtower.jsx, so re-publishing in a TypeScript host left it beside the
+     * Watchtower.tsx the app actually loads, which kept the old stub.
+     */
+    private function strayPageAdvisory(): void
+    {
+        if (! is_file(resource_path('js/pages/Watchtower.jsx')) || ! is_file(resource_path('js/pages/Watchtower.tsx'))) {
+            return;
+        }
+
+        $this->advisory('Inertia page extension', 'Both Watchtower.jsx and Watchtower.tsx are in resources/js/pages. A TypeScript app loads Watchtower.tsx, so Watchtower.jsx is a stray copy and the .tsx may be an older stub. Delete Watchtower.jsx, then refresh Watchtower.tsx with `php artisan vendor:publish --tag=watchtower-inertia --force`.', warn: true);
     }
 
     private function checkTailwind(): int

@@ -135,6 +135,20 @@ it('publishes the page stub as .tsx for a TypeScript host', function (): void {
     @unlink(resource_path('js/app.tsx'));
 });
 
+it('re-publishes the page over the existing .tsx in a TypeScript host', function (): void {
+    @mkdir(resource_path('js/pages'), 0777, true);
+    file_put_contents(resource_path('js/app.tsx'), "// tsx host\n");
+    file_put_contents(resource_path('js/pages/Watchtower.tsx'), "// 1.4 stub\n");
+    // The publish destination is read when the provider boots, as in a real host.
+    $this->refreshApplication();
+
+    $this->artisan('vendor:publish', ['--tag' => 'watchtower-inertia', '--force' => true])->assertExitCode(0);
+
+    expect(is_file(resource_path('js/pages/Watchtower.jsx')))->toBeFalse()
+        ->and((string) file_get_contents(resource_path('js/pages/Watchtower.tsx')))
+        ->toBe((string) file_get_contents(__DIR__.'/../../resources/js/pages/Watchtower.jsx'));
+});
+
 it('never prompts for an upstream DSN in standalone mode', function (): void {
     runStandaloneInstall()
         ->expectsOutputToContain('Wrote SENTRY_LARAVEL_DSN to .env')

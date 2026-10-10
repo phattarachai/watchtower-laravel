@@ -9,6 +9,20 @@ This file records anything released before that automation landed.
 
 ## Upgrade notes
 
+### 1.5.1
+
+- **`WATCHTOWER_UI_THEME` works with a config published by 1.4 or earlier.** Laravel's `mergeConfigFrom` only fills
+  missing top-level keys, so a published `server` block hid `server.ui.theme` and the setting did nothing until the
+  config was re-published. The package now fills missing keys at any depth from its defaults, including under
+  `config:cache`. Lists you published (scrub keys, ignored exceptions, middleware) are kept as written, not merged.
+  The 1.5 scrubbing changes already applied to an old config, and still do.
+- **Re-publishing the page respects a TypeScript app.** `vendor:publish --tag=watchtower-inertia --force` now writes
+  `resources/js/pages/Watchtower.tsx` when the app is TypeScript (`tsconfig.json`, `resources/js/app.tsx` or an
+  existing `Watchtower.tsx`), the same detection `watchtower:install` uses. On 1.5.0 it wrote `Watchtower.jsx` beside
+  the `.tsx`, and the app kept loading the old `.tsx`. If you re-published on 1.5.0 in a TypeScript app, delete
+  `resources/js/pages/Watchtower.jsx` and run the publish command again. `watchtower:doctor` now warns when both files
+  exist.
+
 ### 1.5.0
 
 - Requires `phattarachai/watchtower-core` ^1.2. **Issue titles read better, and grouping doesn't change.** A bare date shows
