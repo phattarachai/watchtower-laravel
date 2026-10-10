@@ -26,6 +26,9 @@
             <directory>tests/WithoutInertia</directory>
             <directory>tests/RelayWithoutInertia</directory>
         </testsuite>
+        <testsuite name="LegacyConfig">
+            <directory>tests/LegacyConfig</directory>
+        </testsuite>
     </testsuites>
     <source>
         <include>

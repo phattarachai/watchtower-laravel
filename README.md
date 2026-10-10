@@ -278,6 +278,22 @@ job completes, so an outage never leaves envelope bodies in `failed_jobs`.
 
 The ignored exceptions, the scrubbed keys and the user fields sent are arrays in `config/watchtower.php`.
 
+## Upgrading
+
+```bash
+composer update phattarachai/watchtower-laravel
+php artisan vendor:publish --tag=watchtower-inertia --force
+php artisan watchtower:doctor
+```
+
+You don't need to re-publish `config/watchtower.php`. A key your published file predates is read from the
+package defaults, at any depth, so a new env key such as `WATCHTOWER_UI_THEME` works as soon as you set it. A list
+you published (scrubbed keys, ignored exceptions) stays exactly as you wrote it.
+
+Do re-publish the page stub after an upgrade that changes it (see [CHANGELOG.md](CHANGELOG.md)). It overwrites
+`resources/js/pages/Watchtower.tsx` in a TypeScript app and `Watchtower.jsx` otherwise. `watchtower:doctor` warns
+when both files exist.
+
 ## Troubleshooting
 
 The package ships a Laravel Boost skill that covers install, verification, triage and the MCP server. Install it
