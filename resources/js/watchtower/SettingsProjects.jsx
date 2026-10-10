@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import { BUTTON, BUTTON_ACCENT, CARD, Chip, INPUT, LABEL } from './badges'
-import { CheckIcon, ChevronIcon, CopyIcon, RefreshIcon } from './icons'
+import { CheckIcon, ChevronIcon, CopyIcon, EyeIcon, EyeOffIcon, RefreshIcon } from './icons'
 import { copyText, cx, firstError, sendJson, withId } from './lib'
 
 /**
@@ -124,9 +124,15 @@ function CreateProject({ platforms, endpoints, csrfToken, onCreated, onError }) 
   )
 }
 
+/**
+ * The key is masked everywhere it appears (the key row, the DSN, every snippet)
+ * until the reader reveals it, so a screenshot or a shared screen never leaks
+ * it. Copy always copies the real value.
+ */
 function ProjectCard({ project, endpoints, csrfToken, onUpdated, onRotated, onError }) {
   const [name, setName] = useState(project.name)
   const [busy, setBusy] = useState(false)
+  const [revealed, setRevealed] = useState(false)
 
   const save = async (changes) => {
     setBusy(true)
@@ -196,12 +202,22 @@ function ProjectCard({ project, endpoints, csrfToken, onUpdated, onRotated, onEr
       </div>
 
       <div className="tw:mt-3 tw:flex tw:flex-col tw:gap-2">
-        <CopyRow label="DSN" value={project.dsn} />
+        <CopyRow
+          label="DSN"
+          value={project.dsn}
+          display={revealed ? project.dsn : (project.masked_dsn ?? project.dsn)}
+        />
         <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-2">
           <span className="tw:w-12 tw:shrink-0 tw:text-[11px] tw:text-[var(--wt-text-muted)]">
             Key
           </span>
-          <code className="wt-code tw:text-[var(--wt-text-muted)]">{project.masked_key}</code>
+          <code className="wt-code tw:text-[var(--wt-text-muted)]">
+            {revealed ? project.public_key : project.masked_key}
+          </code>
+          <button type="button" className={BUTTON} onClick={() => setRevealed((value) => !value)}>
+            {revealed ? <EyeOffIcon className="tw:h-3.5 tw:w-3.5" /> : <EyeIcon className="tw:h-3.5 tw:w-3.5" />}
+            {revealed ? 'Hide key' : 'Reveal key'}
+          </button>
           <button type="button" className={BUTTON} disabled={busy} onClick={rotate}>
             <RefreshIcon className="tw:h-3.5 tw:w-3.5" />
             Rotate key
@@ -209,12 +225,27 @@ function ProjectCard({ project, endpoints, csrfToken, onUpdated, onRotated, onEr
         </div>
       </div>
 
-      <Snippets snippets={project.snippets} />
+      <Snippets snippets={project.snippets} revealed={revealed} />
     </section>
   )
 }
 
-function CopyRow({ label, value }) {
+function CopyRow({ label, value, display }) {
+
+  return (
+    <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-2">
+      <span className="tw:w-12 tw:shrink-0 tw:text-[11px] tw:text-[var(--wt-text-muted)]">
+        {label}
+      </span>
+      <code className="wt-code tw:min-w-0 tw:flex-1 tw:truncate tw:rounded tw:bg-[var(--wt-code-bg)] tw:px-2 tw:py-1 tw:text-[var(--wt-text)]">
+        {display ?? value}
+      </code>
+      <CopyButton value={value} />
+    </div>
+  )
+}
+
+function CopyButton({ value }) {
   const [copied, setCopied] = useState(false)
 
   const copy = async () => {
@@ -223,22 +254,14 @@ function CopyRow({ label, value }) {
   }
 
   return (
-    <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-2">
-      <span className="tw:w-12 tw:shrink-0 tw:text-[11px] tw:text-[var(--wt-text-muted)]">
-        {label}
-      </span>
-      <code className="wt-code tw:min-w-0 tw:flex-1 tw:truncate tw:rounded tw:bg-[var(--wt-code-bg)] tw:px-2 tw:py-1 tw:text-[var(--wt-text)]">
-        {value}
-      </code>
-      <button type="button" className={BUTTON} onClick={copy}>
-        {copied ? <CheckIcon className="tw:h-3.5 tw:w-3.5" /> : <CopyIcon className="tw:h-3.5 tw:w-3.5" />}
-        {copied ? 'Copied' : 'Copy'}
-      </button>
-    </div>
+    <button type="button" className={BUTTON} onClick={copy}>
+      {copied ? <CheckIcon className="tw:h-3.5 tw:w-3.5" /> : <CopyIcon className="tw:h-3.5 tw:w-3.5" />}
+      {copied ? 'Copied' : 'Copy'}
+    </button>
   )
 }
 
-function Snippets({ snippets }) {
+function Snippets({ snippets, revealed }) {
   const [open, setOpen] = useState(null)
   const list = Array.isArray(snippets) ? snippets : []
 
@@ -261,9 +284,14 @@ function Snippets({ snippets }) {
             {snippet.label}
           </button>
           {open === snippet.key && (
-            <pre className="wt-code tw:mb-2 tw:overflow-x-auto tw:rounded tw:bg-[var(--wt-code-bg)] tw:p-3 tw:text-[var(--wt-text)]">
-              {snippet.code}
-            </pre>
+            <div className="tw:relative tw:mb-2">
+              <pre className="wt-code tw:overflow-x-auto tw:rounded tw:bg-[var(--wt-code-bg)] tw:p-3 tw:pr-24 tw:text-[var(--wt-text)]">
+                {revealed ? snippet.code : (snippet.masked_code ?? snippet.code)}
+              </pre>
+              <div className="tw:absolute tw:top-2 tw:right-2">
+                <CopyButton value={snippet.code} />
+              </div>
+            </div>
           )}
         </div>
       ))}

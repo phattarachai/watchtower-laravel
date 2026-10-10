@@ -24,7 +24,7 @@ class ClaudeIssuePrompt
         }
 
         $payload = (array) ($event->payload ?? []);
-        $frames = $this->arrayFrames(data_get($payload, 'exception.values.0.stacktrace.frames'));
+        $frames = $this->arrayFrames(data_get(ExceptionChain::thrown($payload), 'stacktrace.frames'));
 
         return implode("\n\n", array_filter([
             $this->instructions($project, $group),
@@ -48,10 +48,16 @@ class ClaudeIssuePrompt
      */
     private function heading(array $payload): string
     {
-        $type = (string) data_get($payload, 'exception.values.0.type', 'Error');
-        $message = trim((string) data_get($payload, 'exception.values.0.value', ''));
+        $chain = ExceptionChain::outermostFirst($payload);
+        $type = (string) ($chain[0]['type'] ?? 'Error');
+        $message = trim((string) ($chain[0]['value'] ?? ''));
 
-        return $message === '' ? "# {$type}" : "# {$type}\n\n{$message}";
+        $causes = array_map(
+            fn (array $cause): string => '- Caused by '.($cause['type'] ?? 'Error').': '.trim((string) ($cause['value'] ?? '')),
+            array_slice($chain, 1),
+        );
+
+        return implode("\n\n", array_filter(["# {$type}", $message, implode("\n", $causes)]));
     }
 
     private function meta(IssueGroup $group, Event $event, string $permalink): string

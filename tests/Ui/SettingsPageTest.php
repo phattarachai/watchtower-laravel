@@ -27,6 +27,29 @@ it('shows every project with its DSN, masked key and install snippets', function
             ->has('endpoints.projectStore'));
 });
 
+it('masks the key in the DSN and every snippet, and defaults the Laravel snippet to no PII', function (): void {
+    $project = makeWatchtowerProject();
+    $key = (string) $project->public_key;
+
+    actingAs(wtUser())
+        ->get(route('watchtower.ui.settings'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('projects.0.public_key', $key)
+            ->where('projects.0.masked_dsn', fn (string $dsn): bool => ! str_contains($dsn, $key) && str_contains($dsn, '•'))
+            ->where('projects.0.snippets', function ($snippets) use ($key): bool {
+                foreach ($snippets as $snippet) {
+                    if (! str_contains($snippet['code'], $key) || str_contains($snippet['masked_code'], $key)) {
+                        return false;
+                    }
+                }
+
+                return true;
+            })
+            ->where('projects.0.snippets.0.code', fn (string $code): bool => str_contains($code, 'SENTRY_SEND_DEFAULT_PII=false')
+                && ! str_contains($code, 'SENTRY_SEND_DEFAULT_PII=true')));
+});
+
 it('creates a project with a slug and a fresh public key', function (): void {
     $response = actingAs(wtUser())
         ->postJson(route('watchtower.ui.projects.store'), ['name' => 'Warehouse App', 'platform' => 'nextjs'])

@@ -151,3 +151,38 @@ it('rejects an unknown status and a cross-project status change', function (): v
         ])
         ->assertNotFound();
 });
+
+it('shows the thrown exception first and its causes after, as Sentry orders the chain oldest-first', function (): void {
+    $project = makeWatchtowerProject();
+    $group = makeWatchtowerGroup($project, ['title' => 'App\Exceptions\CheckoutFailed: Could not place the order']);
+    $event = makeWatchtowerEvent($group);
+
+    $payload = $event->payload;
+    $payload['exception'] = ['values' => [
+        ['type' => 'PDOException', 'value' => 'SQLSTATE[23505]: Unique violation', 'stacktrace' => ['frames' => [
+            ['filename' => '/srv/app/vendor/laravel/framework/src/Illuminate/Database/Connection.php', 'lineno' => 587, 'in_app' => false],
+        ]]],
+        ['type' => 'Illuminate\Database\QueryException', 'value' => 'SQLSTATE[23505]: Unique violation (Connection: pgsql, SQL: insert …)'],
+        ['type' => 'App\Exceptions\CheckoutFailed', 'value' => 'Could not place the order', 'mechanism' => ['type' => 'generic', 'handled' => false], 'stacktrace' => ['frames' => [
+            ['filename' => '/srv/app/app/Http/Controllers/CheckoutController.php', 'lineno' => 47, 'in_app' => true],
+            ['filename' => '/srv/app/app/Actions/Orders/PlaceOrder.php', 'lineno' => 58, 'in_app' => true],
+        ]]],
+    ]];
+    $event->update(['payload' => $payload]);
+
+    actingAs(wtUser())
+        ->get(route('watchtower.ui.issue', ['group' => $group->getKey()]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('event.exception.type', 'App\Exceptions\CheckoutFailed')
+            ->where('event.mechanism.handled', false)
+            ->has('event.stacktrace', 2)
+            ->where('event.stacktrace.1.lineno', 58)
+            ->has('event.causes', 2)
+            ->where('event.causes.0.type', 'Illuminate\Database\QueryException')
+            ->has('event.causes.0.stacktrace', 0)
+            ->where('event.causes.1.type', 'PDOException')
+            ->where('event.causes.1.stacktrace.0.lineno', 587)
+            ->where('markdown', fn (string $markdown): bool => str_contains($markdown, "# App\\Exceptions\\CheckoutFailed\n\nCould not place the order\n\n- Caused by Illuminate\\Database\\QueryException")
+                && str_contains($markdown, 'PlaceOrder.php')));
+});

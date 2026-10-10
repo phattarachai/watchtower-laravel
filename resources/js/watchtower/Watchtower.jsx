@@ -18,13 +18,21 @@ import './watchtower.css'
  * @param {Record<string, string>} endpoints absolute URLs; id-bearing ones carry
  *   a `__ID__` placeholder resolved by `withId()`.
  * @param {{name?: string, version?: string}} [brand]
- * @param {string} [csrfToken] sent with every write request.
+ * @param {'auto'|'light'|'dark'} [theme] 'auto' follows a `.dark` ancestor.
+ * @param {string} [csrfToken] sent with every write request; without it the
+ *   XSRF-TOKEN cookie is used.
  */
 export function Watchtower(props) {
-  const { view, endpoints, brand } = props
+  const { view, endpoints, brand, theme } = props
 
   return (
-    <div className="wt-root tw:min-h-screen tw:text-sm">
+    <div
+      className={cx(
+        'wt-root tw:min-h-screen tw:text-sm',
+        theme === 'light' && 'light',
+        theme === 'dark' && 'dark',
+      )}
+    >
       <TopBar view={view} endpoints={endpoints} brand={brand} />
       <main className="tw:mx-auto tw:w-full tw:max-w-7xl tw:px-4 tw:py-5">
         <Screen {...props} />

@@ -20,6 +20,16 @@ class BeforeSend
      */
     private const string CARD_PATTERN = '/\b\d(?:[ -]?\d){12,18}\b/';
 
+    /**
+     * Scrubbed whatever `scrub_keys` says, since a host's published config
+     * predates new defaults. The SDK filters only Authorization and Cookie, so
+     * without these the CSRF token Inertia and axios send on every request
+     * (`X-XSRF-TOKEN`) and a form's `_token` reach the event as-is.
+     *
+     * @var list<string>
+     */
+    public const array ALWAYS_SCRUBBED_KEYS = ['x-csrf-token', 'x-xsrf-token', '_token'];
+
     public function __invoke(Event $event, ?EventHint $hint = null): ?Event
     {
         if (config('watchtower.before_send.enabled') === false) {
@@ -71,8 +81,10 @@ class BeforeSend
                 $request['headers'] = $this->scrubArray($request['headers']);
             }
 
+            // With send_default_pii the SDK attaches every cookie, the session and
+            // remember-me cookies included. Keep the names, never the values.
             if (isset($request['cookies']) && is_array($request['cookies'])) {
-                $request['cookies'] = $this->scrubArray($request['cookies']);
+                $request['cookies'] = array_map(fn (): string => self::REDACTED, $request['cookies']);
             }
 
             $event->setRequest($request);
@@ -124,7 +136,7 @@ class BeforeSend
      */
     private function normalizedScrubKeys(): array
     {
-        $keys = (array) config('watchtower.before_send.scrub_keys', []);
+        $keys = [...(array) config('watchtower.before_send.scrub_keys', []), ...self::ALWAYS_SCRUBBED_KEYS];
 
         return array_values(array_unique(
             array_map(fn ($k): string => strtolower((string) $k), $keys)

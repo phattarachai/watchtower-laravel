@@ -81,6 +81,11 @@ resolve: {
 Only the page stub is copied into your app. The module itself is loaded through the alias, so you never have a
 second copy that drifts out of date.
 
+The UI follows your app's dark mode: it turns dark when an ancestor has the `.dark` class, which is how the Laravel
+starter kits do it. Set `WATCHTOWER_UI_THEME=light` or `dark` to pin it. Writes send the `csrf-token` meta tag when
+your layout has one, and otherwise the `XSRF-TOKEN` cookie that Laravel sets on every `web` response, so a layout
+without the meta tag (the React starter kit's) works as-is.
+
 ## Authorize the UI
 
 In the `local` environment the UI is open. Everywhere else, grant access from a service provider:
@@ -248,6 +253,7 @@ job completes, so an outage never leaves envelope bodies in `failed_jobs`.
 | `WATCHTOWER_UI_ENABLED`       | `true`                      | Mount the issue UI (also needs `inertiajs/inertia-laravel`).     |
 | `WATCHTOWER_UI_DOMAIN`        | _(none)_                    | Serve the UI only on this domain.                                |
 | `WATCHTOWER_UI_LOGIN_ROUTE`   | `login`                     | Route name or URL guests are redirected to; empty 403s instead.  |
+| `WATCHTOWER_UI_THEME`         | `auto`                      | `auto` goes dark under the host's `.dark` class; `light` or `dark` pins it. |
 | `WATCHTOWER_MCP_ENABLED`      | `true`                      | Mount the MCP server (needs `laravel/mcp`).                      |
 | `WATCHTOWER_QUEUE_CONNECTION` | _(default connection)_      | Queue connection for `ProcessEventJob` and alert mail.           |
 | `WATCHTOWER_QUEUE_NAME`       | _(default queue)_           | Queue for `ProcessEventJob` and alert mail. Recommended: `watchtower`. |

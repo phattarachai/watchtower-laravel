@@ -39,6 +39,42 @@ it('stores a group and an event from a posted envelope', function (): void {
         ->and($event->payload['exception']['values'][0]['type'])->toBe('RuntimeException');
 });
 
+it('scrubs the CSRF headers, form token and XSRF cookie even under an older published config', function (): void {
+    config(['watchtower.server.ingest.scrub.header_keys' => ['cookie', 'authorization', 'x-csrf-token']]);
+    config(['watchtower.server.ingest.scrub.body_keys' => ['password']]);
+    $project = makeWatchtowerProject();
+
+    postEnvelope($project->id, $project->public_key, SentryEnvelope::build(['request' => [
+        'method' => 'POST',
+        'headers' => ['X-XSRF-TOKEN' => 'eyJpdiI6IkxzRmZ', 'X-CSRF-TOKEN' => 'Gk3uX9fHq', 'Accept' => 'text/html'],
+        'data' => ['_token' => 'Gk3uX9fHq', 'quantity' => 2],
+        'cookies' => ['XSRF-TOKEN' => 'eyJpdiI6Ik'],
+    ]]))->assertSuccessful();
+
+    $request = Event::sole()->payload['request'];
+
+    expect($request['headers']['X-XSRF-TOKEN'])->toBe('[Filtered]')
+        ->and($request['headers']['X-CSRF-TOKEN'])->toBe('[Filtered]')
+        ->and($request['headers']['Accept'])->toBe('text/html')
+        ->and($request['data']['_token'])->toBe('[Filtered]')
+        ->and($request['data']['quantity'])->toBe(2)
+        ->and($request['cookies']['XSRF-TOKEN'])->toBe('[Filtered]');
+});
+
+it('stores a readable title while two values of one bug still share a group', function (): void {
+    $project = makeWatchtowerProject();
+    $fatal = fn (int $limit, int $tried): string => SentryEnvelope::build(['exception' => ['values' => [[
+        'type' => 'Symfony\\Component\\ErrorHandler\\Error\\FatalError',
+        'value' => "Allowed memory size of {$limit} bytes exhausted (tried to allocate {$tried} bytes)",
+    ]]]]);
+
+    postEnvelope($project->id, $project->public_key, $fatal(134217728, 20480))->assertSuccessful();
+    postEnvelope($project->id, $project->public_key, $fatal(268435456, 65536))->assertSuccessful();
+
+    expect(IssueGroup::sole()->title)->toBe('Symfony\\Component\\ErrorHandler\\Error\\FatalError: Allowed memory size of <N> bytes exhausted (tried to allocate <N> bytes)')
+        ->and(IssueGroup::sole()->event_count)->toBe(2);
+});
+
 it('dedupes a repeated exception into the same group', function (): void {
     $project = makeWatchtowerProject();
 

@@ -31,6 +31,17 @@ it('finds layouts with <head> in both conventional locations', function (): void
         ->and($detector->layouts())->toContain('resources/views/layouts/guest.blade.php');
 });
 
+it('finds the Inertia root view the React starter kit renders', function (): void {
+    file_put_contents(
+        $this->base.'/resources/views/app.blade.php',
+        "<html>\n<head>\n@vite(['resources/js/app.tsx'])\n@inertiaHead\n</head>\n<body>\n@inertia\n</body>\n</html>"
+    );
+    file_put_contents($this->base.'/resources/views/welcome.blade.php', '<html><head></head><body>Hi</body></html>');
+    file_put_contents($this->base.'/resources/views/head-only.blade.php', '<html><head>@inertiaHead</head><body></body></html>');
+
+    expect((new LayoutDetector($this->base))->layouts())->toBe(['resources/views/app.blade.php']);
+});
+
 it('skips layouts that have no <head>', function (): void {
     file_put_contents(
         $this->base.'/resources/views/components/layouts/headless.blade.php',

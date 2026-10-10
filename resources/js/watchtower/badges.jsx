@@ -55,6 +55,8 @@ export const BUTTON_ACCENT =
 export const INPUT =
   'tw:w-full tw:rounded-md tw:border tw:border-[var(--wt-border)] tw:bg-[var(--wt-bg)] tw:px-2.5 tw:py-1.5 tw:text-xs tw:text-[var(--wt-text)] tw:outline-none tw:focus:border-[var(--wt-accent)]'
 
+export const CHECKBOX = 'tw:h-3.5 tw:w-3.5 tw:cursor-pointer tw:accent-[var(--wt-accent)]'
+
 export const LABEL =
   'tw:mb-1 tw:block tw:text-[11px] tw:font-medium tw:text-[var(--wt-text-muted)]'
 
