@@ -8,6 +8,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Phattarachai\WatchtowerLaravel\Server\Mcp\McpRegistrar;
 use Phattarachai\WatchtowerLaravel\Server\Models\Project;
 use Phattarachai\WatchtowerLaravel\Server\Sentry\LocalTransport;
@@ -268,16 +269,28 @@ final class DoctorCommand extends Command
         return $flat;
     }
 
+    /**
+     * Resolve the plan the way Horizon's ProvisioningPlan deploys it: the first
+     * environment key that matches APP_ENV (patterns like `*` included) gets
+     * every `defaults` supervisor merged in, and one scaled to zero processes
+     * never starts.
+     */
     private function horizonListensOn(string $connection, string $queue): bool
     {
-        $environments = (array) config('horizon.environments', []);
-        $supervisors = (array) ($environments[app()->environment()] ?? $environments['*'] ?? []);
+        $environment = app()->environment();
+        $plan = collect((array) config('horizon.environments', []))
+            ->first(fn (mixed $supervisors, int|string $name): bool => Str::is((string) $name, $environment));
 
-        foreach ($supervisors as $name => $supervisor) {
-            $options = [...(array) config("horizon.defaults.{$name}", []), ...(array) $supervisor];
+        if ($plan === null) {
+            return false;
+        }
+
+        foreach (array_replace_recursive((array) config('horizon.defaults', []), (array) $plan) as $options) {
+            $options = (array) $options;
             $queues = explode(',', implode(',', (array) ($options['queue'] ?? [])));
+            $processes = (int) ($options['maxProcesses'] ?? $options['max_processes'] ?? $options['processes'] ?? 1);
 
-            if (($options['connection'] ?? $connection) === $connection && in_array($queue, $queues, true)) {
+            if ($processes > 0 && ($options['connection'] ?? $connection) === $connection && in_array($queue, $queues, true)) {
                 return true;
             }
         }
