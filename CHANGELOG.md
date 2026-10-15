@@ -9,6 +9,15 @@ This file records anything released before that automation landed.
 
 ## Upgrade notes
 
+### 1.5.2
+
+- **`watchtower:doctor` reads the Horizon plan the way Horizon runs it.** A supervisor for the Watchtower queue defined
+  only under `horizon.defaults` runs in every environment, because Horizon merges `defaults` into each one. The doctor
+  only counted supervisors also listed under the environment, so it failed "Horizon listens on [watchtower]" while the
+  supervisor was running. It now merges `defaults` into the first environment key that matches `APP_ENV`, `*` and other
+  patterns included, and skips a supervisor scaled to `maxProcesses` 0. When no environment key matches, Horizon starts
+  nothing, so the check still fails.
+
 ### 1.5.1
 
 - **`WATCHTOWER_UI_THEME` works with a config published by 1.4 or earlier.** Laravel's `mergeConfigFrom` only fills

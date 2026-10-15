@@ -174,21 +174,59 @@ it('fails when no Horizon supervisor consumes the Watchtower queue', function ()
         ->assertFailed();
 });
 
-it('passes when a Horizon supervisor consumes the Watchtower queue', function (): void {
+it('passes when a Horizon supervisor consumes the Watchtower queue', function (array $horizon): void {
     config()->set('watchtower.server.self_capture', 'loopback');
     config()->set('watchtower.server.queue.connection', 'redis');
     config()->set('watchtower.server.queue.name', 'watchtower');
-    config()->set('horizon', [
+    config()->set('horizon', $horizon);
+    wireDoctorFixture();
+
+    $this->artisan('watchtower:doctor')->assertSuccessful();
+})->with([
+    'listed under defaults and the environment' => [[
         'defaults' => [
             'app-supervisor-default' => ['connection' => 'redis', 'queue' => ['default']],
             'app-supervisor-watchtower' => ['connection' => 'redis', 'queue' => ['watchtower'], 'maxProcesses' => 1],
         ],
         'environments' => ['testing' => ['app-supervisor-default' => [], 'app-supervisor-watchtower' => []]],
-    ]);
+    ]],
+    'defined only under defaults' => [[
+        'defaults' => ['app-supervisor-watchtower' => ['connection' => 'redis', 'queue' => ['watchtower']]],
+        'environments' => ['testing' => ['app-supervisor-default' => ['connection' => 'redis', 'queue' => ['default']]]],
+    ]],
+    'defined only under the environment' => [[
+        'defaults' => ['app-supervisor-default' => ['connection' => 'redis', 'queue' => ['default']]],
+        'environments' => ['testing' => ['app-supervisor-watchtower' => ['connection' => 'redis', 'queue' => ['watchtower']]]],
+    ]],
+    'defined under the wildcard environment' => [[
+        'defaults' => [],
+        'environments' => [
+            'production' => ['app-supervisor-default' => ['connection' => 'redis', 'queue' => ['default']]],
+            '*' => ['app-supervisor-watchtower' => ['connection' => 'redis', 'queue' => ['watchtower']]],
+        ],
+    ]],
+]);
+
+it('fails when the Watchtower supervisor does not run in this environment', function (array $horizon): void {
+    config()->set('watchtower.server.self_capture', 'loopback');
+    config()->set('watchtower.server.queue.connection', 'redis');
+    config()->set('watchtower.server.queue.name', 'watchtower');
+    config()->set('horizon', $horizon);
     wireDoctorFixture();
 
-    $this->artisan('watchtower:doctor')->assertSuccessful();
-});
+    $this->artisan('watchtower:doctor')
+        ->expectsOutputToContain('events would pile up unprocessed')
+        ->assertFailed();
+})->with([
+    'scaled to zero processes here' => [[
+        'defaults' => ['app-supervisor-watchtower' => ['connection' => 'redis', 'queue' => ['watchtower']]],
+        'environments' => ['testing' => ['app-supervisor-watchtower' => ['maxProcesses' => 0]]],
+    ]],
+    'no environment matches, so Horizon deploys nothing' => [[
+        'defaults' => ['app-supervisor-watchtower' => ['connection' => 'redis', 'queue' => ['watchtower']]],
+        'environments' => ['production' => []],
+    ]],
+]);
 
 function fakeRedisInfo(array $info): void
 {
