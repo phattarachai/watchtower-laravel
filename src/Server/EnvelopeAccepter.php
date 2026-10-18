@@ -134,6 +134,11 @@ class EnvelopeAccepter
         }
 
         $pipeline = app(EventPipeline::class);
+
+        if ($pipeline->isFromBot($item->payload)) {
+            return;
+        }
+
         $event = $pipeline->prepare($item->payload);
         $fingerprint = $pipeline->fingerprint($event);
 

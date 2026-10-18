@@ -141,9 +141,12 @@ Watchtower never self-captures its own queue failures. Anything a worker reports
 The browser SDK posts to your own origin at `/api/watchtower-relay`, so ad blockers that strip Sentry traffic
 don't catch it. In standalone mode that route ingests the envelope locally.
 
-`watchtower:install` publishes a small helper to `resources/js/vendor/watchtower.js` (plus
-`resources/js/vendor/livewire.js`, the Livewire `beforeSend` rules it imports). The helper wraps `Sentry.init(...)`
-with Watchtower's defaults: the same-origin tunnel, no PII, and `denyUrls` for browser extensions. It also passes the
+`watchtower:install` publishes a small helper to `resources/js/vendor/watchtower.js`, plus the two `beforeSend` rule
+files it imports: `resources/js/vendor/livewire.js` (Livewire noise) and `resources/js/vendor/noise.js` (crawlers and
+chunk loads). The helper wraps `Sentry.init(...)` with Watchtower's defaults: the same-origin tunnel, no PII, and
+`denyUrls` for browser extensions. It drops events from crawlers (Googlebot, GoogleOther, bingbot, …), and sends every
+failed load of a code-split chunk (`Failed to fetch dynamically imported module: …/Show-<hash>.js` and the Safari and
+Firefox wording) under one fingerprint, so a deploy doesn't open one issue per old chunk hash. It also passes the
 `<meta name="watchtower-user-*">` tags to `Sentry.setUser(...)`. Call it once per Vite entry:
 
 ```js
@@ -263,6 +266,7 @@ job completes, so an outage never leaves envelope bodies in `failed_jobs`.
 | `WATCHTOWER_MAX_EVENT_BYTES`  | `200000`                    | Events are trimmed to this JSON size before being queued.        |
 | `WATCHTOWER_MAX_STRING_BYTES` | `8192`                      | Cap on any single string in an event.                            |
 | `WATCHTOWER_MAX_QUEUE_DEPTH`  | `5000`                      | Past this many waiting jobs, events are counted, not queued.     |
+| `WATCHTOWER_DROP_BOT_EVENTS`  | `true`                      | Drop browser events whose User-Agent is a crawler, for clients older than the SDK-side filter. |
 | `WATCHTOWER_REDACT_SQL_VALUES` | `true`                     | Strip row values from SQL error messages and query breadcrumbs.  |
 | `WATCHTOWER_USER_CONTEXT`     | `true`                      | Attach the signed-in user to events (middleware on `web`/`api`). |
 | `WATCHTOWER_USER_CONTEXT_GUARDS` | `auto`                   | `auto` tries every guard; or a comma list (`admin,web`) in priority order. |

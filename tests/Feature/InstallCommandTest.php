@@ -66,6 +66,7 @@ afterEach(function (): void {
     @unlink(base_path('vite.config.js'));
     @unlink(resource_path('js/vendor/watchtower.js'));
     @unlink(resource_path('js/vendor/livewire.js'));
+    @unlink(resource_path('js/vendor/noise.js'));
     @rmdir(resource_path('js/vendor'));
     @rmdir(resource_path('js'));
 
@@ -280,7 +281,8 @@ it('prints the initWatchtower() snippet and @watchtowerUser directive when Vite 
         ->expectsOutputToContain('@watchtowerUser')
         ->assertExitCode(0);
 
-    expect(is_file(resource_path('js/vendor/watchtower.js')))->toBeTrue();
+    expect(is_file(resource_path('js/vendor/watchtower.js')))->toBeTrue()
+        ->and(is_file(resource_path('js/vendor/noise.js')))->toBeTrue();
 });
 
 it('suggests the package-manager-specific install command for @sentry/browser', function (): void {

@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/browser';
-import { beforeSend } from './livewire.js';
+import { beforeSend as livewireBeforeSend } from './livewire.js';
+import { beforeSend as noiseBeforeSend } from './noise.js';
 
 let initialized = false;
 
@@ -7,7 +8,7 @@ let initialized = false;
  * Initialize the Watchtower browser SDK and apply the logged-in user.
  *
  * Wraps Sentry.init() with the Watchtower-tuned defaults (same-origin tunnel,
- * no PII, browser-extension denyUrls) and forwards <meta name="watchtower-user-*">
+ * no PII, browser-extension denyUrls, crawler and chunk-load rules) and forwards <meta name="watchtower-user-*">
  * tags into Sentry's user scope.
  *
  * Idempotent — only the first call performs Sentry.init(); subsequent calls
@@ -28,7 +29,11 @@ export function initWatchtower() {
             environment: import.meta.env.VITE_SENTRY_ENVIRONMENT,
             sendDefaultPii: false,
             tracesSampleRate: 0,
-            beforeSend,
+            beforeSend: (event, hint) => {
+                const kept = noiseBeforeSend(event, navigator.userAgent);
+
+                return kept && livewireBeforeSend(kept, hint);
+            },
             denyUrls: [
                 /^chrome-extension:\/\//i,
                 /^moz-extension:\/\//i,

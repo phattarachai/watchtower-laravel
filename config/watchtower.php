@@ -96,6 +96,11 @@ return [
         // queued, so a dead Horizon can't fill Redis. 0 disables the check.
         'max_queue_depth' => (int) env('WATCHTOWER_MAX_QUEUE_DEPTH', 5_000),
 
+        // Drop browser events whose User-Agent is a crawler (Googlebot,
+        // GoogleOther, bingbot, …), for clients older than the SDK-side filter.
+        // Server-side events and HeadlessChrome browser tests still report.
+        'drop_bot_events' => filter_var(env('WATCHTOWER_DROP_BOT_EVENTS', true), FILTER_VALIDATE_BOOL),
+
         'ingest' => [
             // Top-level keys retained from a Sentry event payload. Anything
             // else is dropped before the row is written.
