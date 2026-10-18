@@ -9,6 +9,18 @@ This file records anything released before that automation landed.
 
 ## Upgrade notes
 
+### 1.6.0
+
+- Requires `phattarachai/watchtower-core` ^1.3.
+- **Crawler browser events are dropped.** The browser helper drops events whose `navigator.userAgent` is a crawler
+  (Googlebot, GoogleOther, bingbot, AdsBot, …), and standalone/dual ingest drops them server-side too
+  (`WATCHTOWER_DROP_BOT_EVENTS`, default `true`). Server-side events and HeadlessChrome browser tests still report.
+- **Chunk-load failures share one issue.** `Failed to fetch dynamically imported module: …/Show-<hash>.js` and the
+  Safari, Firefox and Vite CSS equivalents now group as `chunk-load-error` instead of one issue per hash. Resolve the
+  old per-hash issues; they stop receiving events.
+- **Re-publish the browser helper** to pick up the SDK-side rules: `php artisan vendor:publish --tag=watchtower-js --force`.
+  It now writes a third file, `resources/js/vendor/noise.js`. Ingest covers old clients in the meantime.
+
 ### 1.5.2
 
 - **`watchtower:doctor` reads the Horizon plan the way Horizon runs it.** A supervisor for the Watchtower queue defined

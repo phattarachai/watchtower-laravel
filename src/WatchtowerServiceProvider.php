@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Phattarachai\WatchtowerCore\Alerts\Contracts\EventCounter;
 use Phattarachai\WatchtowerCore\Alerts\Contracts\NotificationLog;
+use Phattarachai\WatchtowerCore\Ingest\BotDetector;
 use Phattarachai\WatchtowerCore\Ingest\EventNormalizer;
 use Phattarachai\WatchtowerCore\Ingest\EventPipeline;
 use Phattarachai\WatchtowerCore\Ingest\EventScrubber;
@@ -135,6 +136,7 @@ class WatchtowerServiceProvider extends ServiceProvider
                 maxEventBytes: (int) config('watchtower.server.max_event_bytes', 200_000),
                 maxStringBytes: (int) config('watchtower.server.max_string_bytes', 8_192),
             ),
+            botDetector: config('watchtower.server.drop_bot_events', true) ? new BotDetector : null,
         ));
     }
 
@@ -177,6 +179,7 @@ class WatchtowerServiceProvider extends ServiceProvider
         $this->publishes([
             __DIR__.'/../resources/js/watchtower.js' => resource_path('js/vendor/watchtower.js'),
             __DIR__.'/../resources/js/livewire.js' => resource_path('js/vendor/livewire.js'),
+            __DIR__.'/../resources/js/noise.js' => resource_path('js/vendor/noise.js'),
         ], 'watchtower-js');
 
         // Only the page needs to live in the host tree — `app.jsx`'s

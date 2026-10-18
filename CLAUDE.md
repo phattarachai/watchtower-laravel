@@ -47,8 +47,13 @@ than an `Error` — as `LivewireRequestFailed: … HTTP <status>`, fingerprinted
 restatement every server failure collapses into one `Object captured as exception with keys: …` issue
 whose stack is the minified SDK, so it reads as if Watchtower itself were crashing.
 
-Both files publish under the `watchtower-js` tag. `livewire.js` is deliberately import-free so it can
-be unit-tested without a bundler or npm install.
+`resources/js/noise.js` runs before it: it drops events whose `navigator.userAgent` is a crawler and
+fingerprints every chunk-load failure as `['chunk-load-error']`. Core applies the same two rules at ingest
+(`BotDetector`, `Fingerprinter`), so keep its `BOT_USER_AGENT` in step with core's.
+
+All three files publish under the `watchtower-js` tag. `livewire.js` and `noise.js` are deliberately
+import-free so they can be unit-tested without a bundler or npm install; `noise.js` takes the user agent
+as an argument.
 
 ## Core first
 

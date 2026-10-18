@@ -75,6 +75,34 @@ it('stores a readable title while two values of one bug still share a group', fu
         ->and(IssueGroup::sole()->event_count)->toBe(2);
 });
 
+function crawlerBrowserEnvelope(): string
+{
+    return SentryEnvelope::build([
+        'platform' => 'javascript',
+        'request' => ['url' => 'https://example.com/posts/1', 'headers' => [
+            'user-agent' => 'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X) Chrome/153.0 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+        ]],
+    ]);
+}
+
+it('drops a browser event rendered by a crawler', function (): void {
+    $project = makeWatchtowerProject();
+
+    postEnvelope($project->id, $project->public_key, crawlerBrowserEnvelope())->assertSuccessful();
+
+    expect(IssueGroup::count())->toBe(0)
+        ->and(Event::count())->toBe(0);
+});
+
+it('keeps crawler browser events when drop_bot_events is off', function (): void {
+    config(['watchtower.server.drop_bot_events' => false]);
+    $project = makeWatchtowerProject();
+
+    postEnvelope($project->id, $project->public_key, crawlerBrowserEnvelope())->assertSuccessful();
+
+    expect(Event::count())->toBe(1);
+});
+
 it('dedupes a repeated exception into the same group', function (): void {
     $project = makeWatchtowerProject();
 

@@ -66,6 +66,7 @@ afterEach(function (): void {
     @unlink(base_path('resources/js/app.tsx'));
     @unlink(resource_path('js/vendor/watchtower.js'));
     @unlink(resource_path('js/vendor/livewire.js'));
+    @unlink(resource_path('js/vendor/noise.js'));
     @rmdir(resource_path('js/pages'));
     @rmdir(resource_path('js/vendor'));
     @rmdir(resource_path('js'));
