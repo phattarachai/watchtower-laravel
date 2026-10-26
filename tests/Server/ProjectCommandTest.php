@@ -65,6 +65,18 @@ it('rotates a project key', function (): void {
     expect($project->refresh()->public_key)->not->toBe($original);
 });
 
+it('mints an MCP token once and stores only its hash', function (): void {
+    $project = makeWatchtowerProject(['slug' => 'storefront']);
+
+    $this->artisan('watchtower:project', ['action' => 'mcp-token', 'name' => 'storefront'])
+        ->expectsOutputToContain('Minted the MCP token for')
+        ->expectsOutputToContain('wt_mcp_')
+        ->assertSuccessful();
+
+    expect($project->refresh()->mcp_token_hash)->toHaveLength(64)
+        ->not->toStartWith('wt_mcp_');
+});
+
 it('activates and deactivates a project by slug', function (): void {
     $project = makeWatchtowerProject(['slug' => 'shop']);
 

@@ -27,7 +27,7 @@ The trade-off of the shared-DSN default is that the frontend DSN ships in the JS
 | Very noisy frontend (third-party scripts, extensions) | Different cooldowns, different recipients, different rate limits than backend. |
 | Different alert recipients per runtime | Frontend team owns `javascript`; backend team owns `php-laravel`. |
 
-To split: after `watchtower:install`, edit `.env` to point `VITE_SENTRY_DSN` at a second Watchtower project's DSN. Each Watchtower project authenticates its own MCP server — register a second one with `claude mcp add --transport http --scope project watchtower-frontend <host>/mcp --header "Authorization: Bearer <frontend-public-key>"` so Claude can triage both inboxes.
+To split: after `watchtower:install`, edit `.env` to point `VITE_SENTRY_DSN` at a second Watchtower project's DSN. Register a second MCP server for the frontend project with `claude mcp add --transport http --scope project watchtower-frontend <host>/mcp/<frontend-project-id> --header 'Authorization: Bearer ${WATCHTOWER_TOKEN}'` so Claude can triage both inboxes.
 
 ## DSN format — must be numeric
 
@@ -578,15 +578,15 @@ Route::post('/watchtower-relay', function (\Illuminate\Http\Request $request) {
 
 ## Querying via REST — verify + triage
 
-Watchtower exposes `/api/v1/...` endpoints for verifying ingestion and triaging issues without opening the web UI. The DSN's `public_key` is the bearer token — no separate API token needed.
+Watchtower exposes `/api/v1/projects/{project}/...` endpoints for verifying ingestion and triaging issues without opening the web UI. They authenticate with your **personal access token** (PAT), minted at `/me/access-tokens` on the Watchtower server.
 
 ### Auth
 
 ```
-Authorization: Bearer {public_key from your DSN}
+Authorization: Bearer $WATCHTOWER_TOKEN        # your wt_pat_… token
 ```
 
-Or `?api_key={public_key}` for quick curl pokes. The token is project-scoped: every endpoint operates against the project that owns the token. Revoking / regenerating the DSN invalidates the bearer too.
+`{project}` is the project's numeric id (the DSN's last segment) or its slug. The PAT reaches every project in the teams you belong to; a project outside them answers 404. The DSN public key is **not** a read credential: it ships to every browser. The old flat routes (`/api/v1/issues`, …) still accept it during a deprecation window and answer with a `Deprecation` header and a `Link` to the new URL.
 
 Rate limit: 60 req/min per token.
 Pagination: `?page=N`, 25/page.
@@ -594,77 +594,79 @@ Errors: standard Laravel `{"message": "...", "errors": {...}}` shape; 401 unauth
 
 ### Endpoints
 
+Prefix every URL with `/api/v1/projects/{project}`.
+
 | Method | URL | Purpose |
 |---|---|---|
-| GET | `/api/v1/project` | Show this token's project (id, slug, name, platform). |
-| GET | `/api/v1/issues` | List issue groups. Filters: `environment`, `level`, `status`, `fingerprint`, `since` (`24h`/`7d` or ISO), `q`. |
-| GET | `/api/v1/issues/{id}` | Show one issue group. |
-| PATCH | `/api/v1/issues/{id}` | Triage. Body: `{"status":"resolved"}` etc. Snooze requires `snooze_duration`. |
-| GET | `/api/v1/events` | List recent events (slim shape — id, level, env, top_frame). Filters: `environment`, `release`, `level`, `since`, `group_id`. Pagination: `page`, `per_page` (1–100, default 25). |
-| GET | `/api/v1/events/{event_id}` | Full event payload (stacktrace frames, breadcrumbs, request, contexts, tags, extra, sdk, mechanism) — verification core AND debugging entry point. |
+| GET | `/` | Show the project (id, slug, name, platform). |
+| GET | `/issues` | List issue groups. Filters: `environment`, `level`, `status`, `fingerprint`, `since` (`24h`/`7d` or ISO), `q`. |
+| GET | `/issues/{id}` | Show one issue group. |
+| PATCH | `/issues/{id}` | Triage. Body: `{"status":"resolved"}` etc. Snooze requires `snooze_duration`. |
+| GET | `/events` | List recent events (slim shape — id, level, env, top_frame). Filters: `environment`, `release`, `level`, `since`, `group_id`. Pagination: `page`, `per_page` (1–100, default 25). |
+| GET | `/events/{event_id}` | Full event payload (stacktrace frames, breadcrumbs, request, contexts, tags, extra, sdk, mechanism) — verification core AND debugging entry point. |
 
 ### Examples
+
+`PROJECT_ID=$(grep -E '^SENTRY_LARAVEL_DSN=' .env | grep -oE '[0-9]+$')` — the DSN's numeric project segment.
 
 Verify a specific exception arrived:
 
 ```bash
-curl -fsSL -H "Authorization: Bearer $PUBLIC_KEY" \
-  https://<watchtower-host>/api/v1/events/$EVENT_ID
+curl -fsSL -H "Authorization: Bearer $WATCHTOWER_TOKEN" \
+  https://<watchtower-host>/api/v1/projects/$PROJECT_ID/events/$EVENT_ID
 ```
 
 List unresolved errors in production from the last 24h:
 
 ```bash
-curl -fsSL -H "Authorization: Bearer $PUBLIC_KEY" \
-  "https://<watchtower-host>/api/v1/issues?status=unresolved&environment=production&level=error&since=24h"
+curl -fsSL -H "Authorization: Bearer $WATCHTOWER_TOKEN" \
+  "https://<watchtower-host>/api/v1/projects/$PROJECT_ID/issues?status=unresolved&environment=production&level=error&since=24h"
 ```
 
 Resolve an issue:
 
 ```bash
-curl -fsSL -X PATCH -H "Authorization: Bearer $PUBLIC_KEY" \
+curl -fsSL -X PATCH -H "Authorization: Bearer $WATCHTOWER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"status":"resolved"}' \
-  https://<watchtower-host>/api/v1/issues/39
+  https://<watchtower-host>/api/v1/projects/$PROJECT_ID/issues/39
 ```
 
 Snooze for 24h:
 
 ```bash
-curl -fsSL -X PATCH -H "Authorization: Bearer $PUBLIC_KEY" \
+curl -fsSL -X PATCH -H "Authorization: Bearer $WATCHTOWER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"status":"snoozed","snooze_duration":"24h"}' \
-  https://<watchtower-host>/api/v1/issues/39
+  https://<watchtower-host>/api/v1/projects/$PROJECT_ID/issues/39
 ```
 
 Valid `snooze_duration` values: `1h`, `24h`, `7d`, `30d`, `until_event`.
 
-> **Privilege scope.** Anyone with the DSN can read **and** triage issues. Per-user API tokens are deferred to a later milestone.
+> **Privilege scope.** A PAT can read **and** triage every project its user can reach. Keep it in your shell environment, never in a repo.
 
 ## Querying via MCP
 
-Watchtower exposes a Model Context Protocol server at `/mcp` for Claude Code (and any other MCP client). Same auth model as REST — the DSN public_key is the bearer token — and **project-scoped**: each MCP server gives Claude access to one Watchtower project, matching how the project-scoped REST endpoints work. With the package default of one Watchtower project per client app (backend + browser share the DSN), a single MCP registration covers both runtimes.
+Watchtower exposes a Model Context Protocol server at `/mcp/{project}` for Claude Code (and any other MCP client). Same auth model as REST — your PAT is the bearer token — and **project-scoped**: each MCP server gives Claude access to one Watchtower project, matching how the project-scoped REST endpoints work. With the package default of one Watchtower project per client app (backend + browser share the DSN), a single MCP registration covers both runtimes.
 
 ### Add the server
 
 `php artisan watchtower:install` registers the MCP server with Claude Code automatically when the `claude` CLI is on PATH (use `--no-mcp` to skip). It registers with `--scope project`, so the server is written to a committed `.mcp.json` at the repo root rather than the per-machine local config — anyone who pulls the project and runs `composer install` gets the MCP after a one-time approval prompt, without re-running the installer. To register manually after the fact:
 
 ```bash
-claude mcp add --transport http --scope project watchtower https://<watchtower-host>/mcp \
-  --header "Authorization: Bearer <PUBLIC_KEY>"
+claude mcp add --transport http --scope project watchtower https://<watchtower-host>/mcp/<project-id-or-slug> \
+  --header 'Authorization: Bearer ${WATCHTOWER_TOKEN}'
 ```
 
-Extract `<PUBLIC_KEY>` from the project's `.env`:
-
-```bash
-grep -oE '://[a-z0-9]+@' .env | head -1 | tr -d ':/@'
-```
+The project id is the DSN's last segment: `grep -E '^SENTRY_LARAVEL_DSN=' .env | grep -oE '[0-9]+$'`. The single quotes keep
+`${WATCHTOWER_TOKEN}` literal in `.mcp.json`; Claude Code expands it from its own environment, so export the PAT in the
+shell profile Claude Code starts from and restart it.
 
 If you actually split backend and browser into two Watchtower projects (rare — see [When to split into two projects](#when-to-split-into-two-projects)), register one MCP server per project with distinct names so Claude can address each inbox:
 
 ```bash
-claude mcp add --transport http --scope project watchtower-backend  <host>/mcp --header "Authorization: Bearer <backend-public-key>"
-claude mcp add --transport http --scope project watchtower-frontend <host>/mcp --header "Authorization: Bearer <frontend-public-key>"
+claude mcp add --transport http --scope project watchtower-backend  <host>/mcp/<backend-project-id>  --header 'Authorization: Bearer ${WATCHTOWER_TOKEN}'
+claude mcp add --transport http --scope project watchtower-frontend <host>/mcp/<frontend-project-id> --header 'Authorization: Bearer ${WATCHTOWER_TOKEN}'
 ```
 
 ### Tool reference
@@ -701,7 +703,7 @@ The common "fix issue N" flow is a 2-call path:
 
 ### Privilege scope
 
-DSN holder gets read **and** mutate access for that one project. Per-user / per-team-member tokens are not implemented yet — same boundary as the REST endpoints.
+The PAT holder gets read **and** mutate access to every project their teams own — same boundary as the REST endpoints.
 
 ## Troubleshooting
 
@@ -717,10 +719,12 @@ DSN holder gets read **and** mutate access for that one project. Per-user / per-
 | Tunnel: `503 watchtower_dsn_missing` | `WATCHTOWER_DSN` not set in `.env` | Set it, then `php artisan config:clear` |
 | Either: ingest returns 200 but issue page stays empty | Watchtower's Horizon `ingest` queue is stalled | Contact the Watchtower admin |
 | Either: `429 Too Many Requests` from ingest | Per-minute rate limit hit | Back off, or ask admin to raise `rate_limit_per_min` for the project |
-| `/api/v1/...` returns 401 even with the DSN key | Token revoked / DSN regenerated | Get a fresh DSN from project settings |
+| `/api/v1/...` returns 401 | Sending the DSN public key (ingest-only), or the PAT is revoked / expired / not exported | Send your PAT; mint a new one at `/me/access-tokens` |
 | `/api/v1/events/{id}` returns 404 right after sending | Async ingestion hasn't drained yet | Retry after 2–5s |
-| MCP: `claude mcp add` succeeds but tool calls fail with `Unauthenticated` | Bearer token revoked / wrong DSN | Re-copy DSN from project settings; re-run `claude mcp add` |
-| MCP: tool says "Issue not found in this project" but the issue is visible in the Watchtower UI | The issue belongs to a different Watchtower project than the DSN key you registered | Re-run `claude mcp add` with the DSN key for the project that owns the issue, or register a second MCP server alongside the first with a distinct name |
+| MCP: `claude mcp add` succeeds but tool calls fail with `Unauthenticated` | `WATCHTOWER_TOKEN` not exported in the shell Claude Code started from, or the PAT is revoked | Export it (e.g. in `~/.zshrc`), restart Claude Code; mint a new PAT if revoked |
+| MCP: 404 `Project not found` | The `/mcp/{project}` segment names a project outside your teams, or a typo | Use the DSN's numeric project id, or a slug from `GET /api/v1/me/projects` |
+| MCP: tool says "Issue not found in this project" but the issue is visible in the Watchtower UI | The issue belongs to a different Watchtower project than the one in your `/mcp/{project}` URL | Re-run `claude mcp add` with that project's id, or register a second MCP server alongside the first with a distinct name |
+| Embedded MCP returns 401 after upgrading | `WATCHTOWER_MCP_LEGACY_KEYS=false` and `.mcp.json` still sends the public key | `php artisan watchtower:project mcp-token <project>`, export the token as `WATCHTOWER_MCP_TOKEN` |
 | User tab in Watchtower is empty despite a logged-in user triggering the exception | Smart-defaults chain broken at one of three points | Check (a) `SENTRY_SEND_DEFAULT_PII=true` — without it Sentry strips request data + IP before BeforeSend runs; (b) `WATCHTOWER_USER_CONTEXT` not set to `false`; (c) the right guard is listed in `WATCHTOWER_USER_CONTEXT_GUARDS` (or it's `auto`); (d) for browser-side, the `<meta name="watchtower-user-*">` tags are in `<head>` (via `@watchtowerUser`) AND `initWatchtower()` is called. See [Smart defaults](#smart-defaults). |
 | Inbox is suddenly missing `ValidationException` / `404` / auth-fail events | BeforeSend smart-default is dropping them — this is the design | If you actually want these in the inbox, edit `watchtower.before_send.ignored_exceptions` and remove the relevant class, or set `WATCHTOWER_BEFORE_SEND=false` to disable the filter entirely. |
 | Request body in event payload shows `[Filtered]` for a non-secret field | The field name matches an entry in `watchtower.before_send.scrub_keys` (case-insensitive) | Edit `watchtower.before_send.scrub_keys` to remove the entry, or rename the field. |
@@ -749,5 +753,5 @@ Boost re-copies the skill files into `.claude/skills/watchtower-error-tracking/`
 
 This skill is feature-complete for Phase 6. Remaining items, deferred until real need shows up:
 
-- Per-user / per-team-member API tokens. Today the project's DSN public_key is the only credential — anyone with it gets read + mutate access for that project. Adequate for small teams; revisit when trust boundaries inside a project start mattering.
+- Read-only tokens. A PAT reads, triages and provisions; an embedded MCP token reads and triages its project. Add narrower abilities if tokens ever go to people outside the owner's teams.
 - Bulk triage tools (`resolve_many`, `snooze_many`). Not needed until agents complain about one-at-a-time mutations.

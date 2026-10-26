@@ -129,7 +129,7 @@ it('prints the manual claude mcp add command when claude is not on PATH', functi
     $this->artisan('watchtower:install', ['--dsn' => 'http://abc@watchtower.test/42'])
         ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
         ->expectsOutputToContain('Claude Code CLI (claude) not detected on PATH.')
-        ->expectsOutputToContain('claude mcp add --transport http --scope project watchtower http://watchtower.test/mcp --header "Authorization: Bearer abc"')
+        ->expectsOutputToContain("claude mcp add --transport http --scope project watchtower http://watchtower.test/mcp/42 --header 'Authorization: Bearer \${WATCHTOWER_TOKEN}'")
         ->assertExitCode(0);
 });
 
@@ -171,9 +171,24 @@ it('registers the MCP with Claude when the binary is available', function (): vo
     expect($registrar->lastCall)->toMatchArray([
         'binary' => '/usr/local/bin/claude',
         'name' => 'watchtower',
-        'url' => 'http://watchtower.test/mcp',
-        'bearer' => 'abc',
+        'url' => 'http://watchtower.test/mcp/42',
+        'bearer' => '${WATCHTOWER_TOKEN}',
     ]);
+});
+
+it('tells the user to export WATCHTOWER_TOKEN when it is not set', function (): void {
+    $previous = getenv('WATCHTOWER_TOKEN');
+    putenv('WATCHTOWER_TOKEN');
+
+    try {
+        $this->artisan('watchtower:install', ['--dsn' => 'http://abc@watchtower.test/42'])
+            ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'yes')
+            ->expectsOutputToContain('WATCHTOWER_TOKEN is not set in this shell.')
+            ->expectsOutputToContain('http://watchtower.test/me/access-tokens')
+            ->assertExitCode(0);
+    } finally {
+        $previous === false ? putenv('WATCHTOWER_TOKEN') : putenv('WATCHTOWER_TOKEN='.$previous);
+    }
 });
 
 it('prints intended MCP command in dry-run mode when claude is available', function (): void {

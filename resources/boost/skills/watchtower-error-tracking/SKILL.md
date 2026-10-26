@@ -1,7 +1,7 @@
 ---
 name: watchtower-error-tracking
 description: "Wire up Watchtower (a self-hosted, Sentry-compatible exception tracker) into a Laravel or browser app, and connect Claude Code to its MCP server for in-conversation issue triage. Triggers on \"Watchtower\", \"set up error tracking\", \"verify the exception was reported\", WATCHTOWER_DSN, SENTRY_LARAVEL_DSN, or VITE_SENTRY_DSN."
-version: 2026.10.10.1
+version: 2026.10.26.1
 ---
 
 # Watchtower error tracking
@@ -104,7 +104,7 @@ leaving the terminal — no clicking through the UI. This needs a **Personal Acc
 (PAT) stored once on the dev machine at `~/.watchtower/token`.
 
 ```bash
-PAT=$(cat ~/.watchtower/token 2>/dev/null)
+PAT=${WATCHTOWER_TOKEN:-$(cat ~/.watchtower/token 2>/dev/null)}
 if [ -n "$PAT" ]; then
   DSN=$(curl -fsS -X POST https://<watchtower-host>/api/v1/projects \
     -H "Authorization: Bearer $PAT" -H 'Content-Type: application/json' \
@@ -125,7 +125,12 @@ team (default: the PAT user's first team). Resolve / verify a slug or team with
 
 ```bash
 echo '<token>' > ~/.watchtower/token && chmod 600 ~/.watchtower/token
+echo 'export WATCHTOWER_TOKEN="$(cat ~/.watchtower/token 2>/dev/null)"' >> ~/.zshrc
 ```
+
+The same PAT is the read credential for the REST API and the MCP server below, which Claude Code reads from
+`WATCHTOWER_TOKEN` in its own environment. Every machine that runs Claude Code (a laptop, a server running agent
+sessions) needs its own PAT exported, and Claude Code must be restarted after the export.
 
 **No PAT?** Fall back to the manual onboarding flow below — create the project in the
 Watchtower UI, copy its DSN, and run `watchtower:install` (it prompts for the DSN).
@@ -167,36 +172,37 @@ Config reference (`config/watchtower.php` → `user_context` and `before_send` s
 
 ## Verifying an exception via REST
 
-When MCP isn't available, the DSN's public key doubles as a Bearer token for read + triage against the REST API:
+When MCP isn't available, query the REST API with your personal access token (`WATCHTOWER_TOKEN`, see the bootstrap
+above). The DSN's public key only ingests: it ships to every browser, so it can't read anything.
 
 ```bash
 EVENT_ID=$(php artisan tinker --execute 'echo \Sentry\captureMessage("watchtower-probe-".now())->__toString();')
-PUBLIC_KEY=$(grep -oE '://[a-z0-9]+@' .env | head -1 | tr -d ':/@')   # extract from SENTRY_LARAVEL_DSN
+PROJECT_ID=$(grep -E '^SENTRY_LARAVEL_DSN=' .env | grep -oE '[0-9]+$')   # the DSN's numeric project segment
 
-curl -fsSL -H "Authorization: Bearer $PUBLIC_KEY" \
-  https://<watchtower-host>/api/v1/events/$EVENT_ID
+curl -fsSL -H "Authorization: Bearer $WATCHTOWER_TOKEN" \
+  https://<watchtower-host>/api/v1/projects/$PROJECT_ID/events/$EVENT_ID
 ```
 
 200 → ingested. 404 → not received yet (the queue is async; retry after a few seconds). Full endpoint list in `reference.md` § "Querying via REST".
 
 ## MCP server
 
-Watchtower exposes an MCP server at `/mcp` so Claude can query and triage issues directly. Each registration is scoped to one Watchtower project — same as the project-scoped REST endpoints. The package's default of one Watchtower project per client app means a single registration covers backend exceptions and browser exceptions in the same inbox.
+Watchtower exposes an MCP server at `/mcp/{project}` (project id or slug) so Claude can query and triage issues directly. Each registration is scoped to one Watchtower project — same as the project-scoped REST endpoints. The package's default of one Watchtower project per client app means a single registration covers backend exceptions and browser exceptions in the same inbox.
 
 `watchtower:install` registers it automatically when the `claude` CLI is on PATH, using `--scope project` so the config lands in a committed `.mcp.json` at the repo root — teammates who `composer install` get the MCP on pull (after approving it once) without re-running the installer. Manual registration:
 
 ```bash
-claude mcp add --transport http --scope project watchtower https://<watchtower-host>/mcp \
-  --header "Authorization: Bearer <PUBLIC_KEY>"
+claude mcp add --transport http --scope project watchtower https://<watchtower-host>/mcp/<project-id-or-slug> \
+  --header 'Authorization: Bearer ${WATCHTOWER_TOKEN}'
 ```
 
-`<PUBLIC_KEY>` is the project's DSN public_key — the segment between `https://` and `@` in `SENTRY_LARAVEL_DSN`. It's already shipped to browsers via `VITE_SENTRY_DSN`, so committing it in `.mcp.json` is safe. If you actually split backend and browser into two Watchtower projects (rare — see `reference.md` § "When to split into two projects"), register one MCP server per project with distinct names (e.g. `watchtower-backend`, `watchtower-frontend`).
+The single quotes keep `${WATCHTOWER_TOKEN}` literal, so `.mcp.json` holds the variable name and Claude Code expands it from its environment at startup. **Never commit a token into `.mcp.json`**, and never use the DSN public key there: it is public, and the server accepts it for reads only during a deprecation window. If you actually split backend and browser into two Watchtower projects (rare — see `reference.md` § "When to split into two projects"), register one MCP server per project with distinct names (e.g. `watchtower-backend`, `watchtower-frontend`).
 
-**Standalone / dual installs** serve the same tools from the app itself at `{APP_URL}/{prefix}/mcp` (default prefix `watchtower`), authenticated with a project's public key from `watchtower:project list`. It needs `composer require laravel/mcp` — the package suggests rather than requires it, and `watchtower:doctor` says so when it's missing. Nine tools, all scoped to the one project whose key authenticated the request (the central server's key widens to the whole team; this one does not).
+**Standalone / dual installs** serve the same tools from the app itself at `{APP_URL}/{prefix}/mcp` (default prefix `watchtower`), authenticated with the project's **MCP token**: `watchtower:install` mints one for the first project and prints it once; mint or replace one with `php artisan watchtower:project mcp-token <project>`. Export it as `WATCHTOWER_MCP_TOKEN`. Until `WATCHTOWER_MCP_LEGACY_KEYS=false` the server still accepts the public DSN key with a logged deprecation; set it false once `.mcp.json` sends the token. It needs `composer require laravel/mcp` — the package suggests rather than requires it, and `watchtower:doctor` says so when it's missing. Nine tools, all scoped to the one project whose token authenticated the request.
 
 ```bash
 claude mcp add --transport http --scope project watchtower https://shop.test/watchtower/mcp \
-  --header "Authorization: Bearer <PROJECT_PUBLIC_KEY>"
+  --header 'Authorization: Bearer ${WATCHTOWER_MCP_TOKEN}'
 ```
 
 ## MCP triage (when `mcp__watchtower__*` tools are connected)

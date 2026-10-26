@@ -43,6 +43,13 @@ return [
         'mcp' => [
             'enabled' => filter_var(env('WATCHTOWER_MCP_ENABLED', true), FILTER_VALIDATE_BOOL),
             'middleware' => ['throttle:60,1'],
+
+            // The MCP server authenticates with a project's MCP token
+            // (`watchtower:project mcp-token`). While this is true it also
+            // still accepts the project's public DSN key, logging a
+            // deprecation; that key ships to every browser, so set false once
+            // your .mcp.json sends the MCP token. Defaults to false in v2.
+            'legacy_keys' => filter_var(env('WATCHTOWER_MCP_LEGACY_KEYS', true), FILTER_VALIDATE_BOOL),
         ],
 
         // Where ProcessEventJob runs. null = the host's default connection and

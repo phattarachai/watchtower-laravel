@@ -410,9 +410,35 @@ class InstallCommand extends Command
 
         $prefix = trim((string) config('watchtower.server.path', 'watchtower'), '/');
         $url = rtrim((string) config('app.url', 'http://localhost'), '/').'/'.$prefix.'/mcp';
-        $key = $project->public_key ?? '{project-public-key}';
 
-        $this->registerMcp($url, $key, $dryRun);
+        $this->mintEmbeddedMcpToken($project, $dryRun);
+        $this->registerMcp($url, 'WATCHTOWER_MCP_TOKEN', $dryRun);
+    }
+
+    /**
+     * The embedded MCP server takes a secret per-project token, not the public
+     * DSN key. A re-run keeps an existing token: its plaintext is gone, and
+     * replacing it would break every machine already holding it.
+     */
+    private function mintEmbeddedMcpToken(?Project $project, bool $dryRun): void
+    {
+        if ($dryRun || $project === null) {
+            $this->line('Would mint an MCP token for the first project (php artisan watchtower:project mcp-token <project>).');
+
+            return;
+        }
+
+        if ($project->mcp_token_hash !== null) {
+            $this->line("Project [{$project->name}] already has an MCP token. Replace it with: php artisan watchtower:project mcp-token {$project->slug}");
+
+            return;
+        }
+
+        $token = $project->mintMcpToken();
+
+        $this->info('Minted an MCP token for the embedded MCP server. It is shown once:');
+        $this->line('  '.$token);
+        $this->line('Export it as WATCHTOWER_MCP_TOKEN in the shell Claude Code starts from (e.g. ~/.zshrc). Never commit it.');
     }
 
     private function installMcp(string $dsn, bool $dryRun): void
@@ -428,15 +454,27 @@ class InstallCommand extends Command
         }
 
         $this->registerMcp(
-            sprintf('%s://%s/mcp', $parsed['scheme'], $parsed['host_with_port']),
-            $parsed['public_key'],
+            sprintf('%s://%s/mcp/%d', $parsed['scheme'], $parsed['host_with_port'], $parsed['project_id']),
+            'WATCHTOWER_TOKEN',
             $dryRun,
         );
+
+        if ((string) getenv('WATCHTOWER_TOKEN') === '') {
+            $this->warn('WATCHTOWER_TOKEN is not set in this shell.');
+            $this->line('The MCP server authenticates with your Watchtower personal access token, not the DSN key. Mint one at');
+            $this->line(sprintf('  %s://%s/me/access-tokens', $parsed['scheme'], $parsed['host_with_port']));
+            $this->line('and export it as WATCHTOWER_TOKEN in the shell Claude Code starts from (e.g. ~/.zshrc). Never commit it.');
+        }
     }
 
-    private function registerMcp(string $url, string $publicKey, bool $dryRun): void
+    /**
+     * The bearer is written as the literal `${ENV_VAR}`: Claude Code expands it
+     * from its own environment, so the committed .mcp.json holds no secret.
+     */
+    private function registerMcp(string $url, string $tokenEnvVar, bool $dryRun): void
     {
-        $manualCommand = sprintf('claude mcp add --transport http --scope project watchtower %s --header "Authorization: Bearer %s"', $url, $publicKey);
+        $bearer = '${'.$tokenEnvVar.'}';
+        $manualCommand = sprintf("claude mcp add --transport http --scope project watchtower %s --header 'Authorization: Bearer %s'", $url, $bearer);
         $registrar = app(ClaudeMcpRegistrar::class);
         $binary = $registrar->find();
 
@@ -454,11 +492,11 @@ class InstallCommand extends Command
             return;
         }
 
-        $result = $registrar->register($binary, 'watchtower', $url, $publicKey, base_path());
+        $result = $registrar->register($binary, 'watchtower', $url, $bearer, base_path());
 
         if ($result['success']) {
             $this->info('Registered Watchtower MCP server with Claude Code (key: watchtower).');
-            $this->line('Wrote project-scoped .mcp.json — commit it so teammates get the MCP on pull.');
+            $this->line('Wrote project-scoped .mcp.json — commit it so teammates get the MCP on pull. It holds ${'.$tokenEnvVar.'}, not the token.');
 
             return;
         }

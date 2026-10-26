@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $slug
  * @property string $platform
  * @property string $public_key
+ * @property string|null $mcp_token_hash
  * @property int|null $retention_days
  * @property bool $is_active
  */
@@ -19,9 +20,31 @@ class Project extends WatchtowerModel
 {
     protected $table = 'watchtower_projects';
 
+    /** @var list<string> */
+    protected $hidden = ['mcp_token_hash'];
+
     public static function newPublicKey(): string
     {
         return bin2hex(random_bytes(16));
+    }
+
+    public static function hashMcpToken(string $plaintext): string
+    {
+        return hash('sha256', $plaintext);
+    }
+
+    /**
+     * Mint the secret the embedded MCP server accepts for this project. Only
+     * its hash is stored, so the plaintext is returned once and never again;
+     * minting replaces any earlier token.
+     */
+    public function mintMcpToken(): string
+    {
+        $plaintext = 'wt_mcp_'.bin2hex(random_bytes(20));
+
+        $this->forceFill(['mcp_token_hash' => self::hashMcpToken($plaintext)])->save();
+
+        return $plaintext;
     }
 
     /**

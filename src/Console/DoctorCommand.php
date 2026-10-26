@@ -312,7 +312,27 @@ final class DoctorCommand extends Command
             return;
         }
 
-        $this->advisory('MCP server', 'Mounted at '.McpRegistrar::route().' — authenticate with a project public key.');
+        $project = new Project;
+
+        if (! Schema::connection($project->getConnectionName())->hasColumn($project->getTable(), 'mcp_token_hash')) {
+            $this->advisory('MCP server', 'Mounted at '.McpRegistrar::route().' — run `php artisan migrate` to add MCP tokens.', warn: true);
+
+            return;
+        }
+
+        if (! Project::query()->where('is_active', true)->whereNotNull('mcp_token_hash')->exists()) {
+            $this->advisory('MCP server', 'Mounted at '.McpRegistrar::route().' — no active project has an MCP token. Mint one with `php artisan watchtower:project mcp-token <project>`.', warn: true);
+
+            return;
+        }
+
+        if ((bool) config('watchtower.server.mcp.legacy_keys', true)) {
+            $this->advisory('MCP server', 'Mounted at '.McpRegistrar::route().' — still accepts public DSN keys. Set WATCHTOWER_MCP_LEGACY_KEYS=false once .mcp.json sends the MCP token.', warn: true);
+
+            return;
+        }
+
+        $this->advisory('MCP server', 'Mounted at '.McpRegistrar::route().' — authenticates with project MCP tokens.');
     }
 
     private function selfCaptureCheck(): int
