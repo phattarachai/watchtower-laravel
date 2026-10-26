@@ -120,6 +120,8 @@ it('writes env keys, creates the first project and patches the host build files'
     expect((string) file_get_contents(resource_path('css/app.css')))->not->toContain('prefix(tw)');
 
     expect(is_file(resource_path('js/pages/Watchtower.jsx')))->toBeTrue();
+
+    expect($project->mcp_token_hash)->not->toBeNull();
 });
 
 it('publishes the page stub as .tsx for a TypeScript host', function (): void {
@@ -177,7 +179,8 @@ it('is idempotent on a second run', function (): void {
         ->assertExitCode(0);
 
     expect(Project::query()->count())->toBe(1)
-        ->and(Project::query()->firstOrFail()->public_key)->toBe($project->public_key);
+        ->and(Project::query()->firstOrFail()->public_key)->toBe($project->public_key)
+        ->and(Project::query()->firstOrFail()->mcp_token_hash)->toBe($project->mcp_token_hash);
 
     $vite = (string) file_get_contents(base_path('vite.config.js'));
     $css = (string) file_get_contents(resource_path('css/watchtower.css'));

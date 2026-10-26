@@ -36,7 +36,7 @@ function callMcpTool(string $key, string $name, array $arguments = []): TestResp
 
 beforeEach(function (): void {
     $this->project = makeWatchtowerProject(['name' => 'Primary']);
-    $this->key = $this->project->public_key;
+    $this->key = $this->project->mintMcpToken();
 });
 
 it('lists every Watchtower tool', function (): void {
@@ -84,6 +84,28 @@ it('rejects a request without a bearer token', function (): void {
 
 it('rejects a wrong bearer token', function (): void {
     callMcp('not-a-real-key', 'tools/list')->assertStatus(401);
+});
+
+it('accepts the public DSN key while legacy keys are on, flagged as deprecated', function (): void {
+    config(['watchtower.server.mcp.legacy_keys' => true]);
+
+    callMcp($this->project->public_key, 'tools/list')
+        ->assertOk()
+        ->assertHeader('Deprecation', 'true');
+});
+
+it('rejects the public DSN key once legacy keys are off', function (): void {
+    config(['watchtower.server.mcp.legacy_keys' => false]);
+
+    callMcp($this->project->public_key, 'tools/list')->assertStatus(401);
+    callMcp($this->key, 'tools/list')->assertOk()->assertHeaderMissing('Deprecation');
+});
+
+it('rejects a replaced MCP token', function (): void {
+    $replacement = $this->project->mintMcpToken();
+
+    callMcp($this->key, 'tools/list')->assertStatus(401);
+    callMcp($replacement, 'tools/list')->assertOk();
 });
 
 it('rejects the key of a deactivated project', function (): void {

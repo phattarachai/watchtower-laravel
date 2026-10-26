@@ -16,14 +16,14 @@ use Phattarachai\WatchtowerLaravel\Server\Ui\ProjectPresenter;
 class ProjectCommand extends Command
 {
     /** @var list<string> */
-    private const array ACTIONS = ['list', 'create', 'rotate-key', 'activate', 'deactivate'];
+    private const array ACTIONS = ['list', 'create', 'rotate-key', 'mcp-token', 'activate', 'deactivate'];
 
     protected $signature = 'watchtower:project
-        {action=list : list, create, rotate-key, activate or deactivate}
+        {action=list : list, create, rotate-key, mcp-token, activate or deactivate}
         {name? : Project name (create) or name/slug/id of an existing project}
         {--platform=laravel : Platform for a newly created project}';
 
-    protected $description = 'List, create, rotate or (de)activate embedded Watchtower projects.';
+    protected $description = 'List, create, rotate, mint MCP tokens for or (de)activate embedded Watchtower projects.';
 
     public function handle(): int
     {
@@ -38,6 +38,7 @@ class ProjectCommand extends Command
         return match ($action) {
             'create' => $this->create(),
             'rotate-key' => $this->rotateKey(),
+            'mcp-token' => $this->mintMcpToken(),
             'activate' => $this->setActive(true),
             'deactivate' => $this->setActive(false),
             default => $this->list(),
@@ -57,7 +58,7 @@ class ProjectCommand extends Command
         $appUrl = (string) config('app.url', 'http://localhost');
 
         $this->table(
-            ['ID', 'Name', 'Slug', 'Platform', 'Active', 'Key', 'DSN'],
+            ['ID', 'Name', 'Slug', 'Platform', 'Active', 'Key', 'MCP token', 'DSN'],
             $projects->map(fn (Project $project): array => [
                 (string) $project->getKey(),
                 $project->name,
@@ -65,6 +66,7 @@ class ProjectCommand extends Command
                 $project->platform,
                 $project->is_active ? 'yes' : 'no',
                 $this->mask($project->public_key),
+                $project->mcp_token_hash === null ? 'none' : 'set',
                 $project->buildDsn($appUrl),
             ])->all(),
         );
@@ -120,6 +122,24 @@ class ProjectCommand extends Command
 
         $this->info("Rotated the key for [{$project->name}]. Update every SDK DSN:");
         $this->line($project->refresh()->buildDsn((string) config('app.url', 'http://localhost')));
+
+        return self::SUCCESS;
+    }
+
+    private function mintMcpToken(): int
+    {
+        $project = $this->findProject();
+
+        if ($project === null) {
+            return self::FAILURE;
+        }
+
+        $replacing = $project->mcp_token_hash !== null;
+        $token = $project->mintMcpToken();
+
+        $this->info(($replacing ? 'Replaced' : 'Minted')." the MCP token for [{$project->name}]. It is shown once:");
+        $this->line($token);
+        $this->line('Export it as WATCHTOWER_MCP_TOKEN in the shell Claude Code starts from; .mcp.json sends Bearer ${WATCHTOWER_MCP_TOKEN}. Never commit it.');
 
         return self::SUCCESS;
     }

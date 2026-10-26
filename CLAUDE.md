@@ -22,7 +22,7 @@ It will:
 3. Patch `bootstrap/app.php` so `Integration::handles($exceptions)` runs inside `withExceptions(...)`.
 4. Publish `config/watchtower.php`.
 5. If a Vite config exists, set `VITE_SENTRY_DSN` (same value as `SENTRY_LARAVEL_DSN`), `VITE_SENTRY_TUNNEL=/api/watchtower-relay`, and `VITE_SENTRY_ENVIRONMENT=${APP_ENV}`. To split backend and frontend into two Watchtower projects, edit `VITE_SENTRY_DSN` in `.env` after install — see the skill's `reference.md` § "When to split into two projects".
-6. If `claude` (Claude Code CLI) is on PATH, register the Watchtower HTTP MCP server with `--scope project` (writes a committed `.mcp.json` so teammates get the MCP on `composer install`, not just the machine that ran install). Pass `--no-mcp` to skip.
+6. If `claude` (Claude Code CLI) is on PATH, register the Watchtower HTTP MCP server with `--scope project` (writes a committed `.mcp.json` so teammates get the MCP on `composer install`, not just the machine that ran install). The bearer is the literal `${WATCHTOWER_TOKEN}` (relay: the user's PAT, URL `/mcp/{project_id}`) or `${WATCHTOWER_MCP_TOKEN}` (embedded: a per-project MCP token the install mints once) — never the public DSN key, which ships to browsers. Pass `--no-mcp` to skip.
 
 ## Browser init
 

@@ -9,6 +9,20 @@ This file records anything released before that automation landed.
 
 ## Upgrade notes
 
+### 1.7.0
+
+- **The MCP server stops treating the public DSN key as a read credential.** That key ships to every browser in
+  `VITE_SENTRY_DSN`, so anyone who opened the site could read its events and resolve its issues.
+- **Relay installs:** `watchtower:install` now registers `{host}/mcp/{project_id}` with
+  `Authorization: Bearer ${WATCHTOWER_TOKEN}`, your personal access token on the central server, read from Claude
+  Code's environment. Re-run `watchtower:install --no-interaction` or edit `.mcp.json` by hand, and export
+  `WATCHTOWER_TOKEN`. The REST examples in the skill moved to `/api/v1/projects/{project}/…`.
+- **Standalone / dual installs:** run `php artisan migrate` (adds `watchtower_projects.mcp_token_hash`), then
+  `php artisan watchtower:project mcp-token <project>`, export the token as `WATCHTOWER_MCP_TOKEN`, point `.mcp.json`
+  at `Bearer ${WATCHTOWER_MCP_TOKEN}`, and set `WATCHTOWER_MCP_LEGACY_KEYS=false`. Until you do, the public key still
+  works and logs a deprecation; the default flips in 2.0.
+- Re-publish the skill with `php artisan boost:update` so Claude stops committing keys into `.mcp.json`.
+
 ### 1.6.0
 
 - Requires `phattarachai/watchtower-core` ^1.3.

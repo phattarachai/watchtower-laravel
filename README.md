@@ -117,6 +117,7 @@ is reported by name. It exits non-zero while something still needs fixing, so yo
 | `watchtower:project list`                   | Projects with masked keys and full DSNs.                            |
 | `watchtower:project create "Name"`          | New project; prints its DSN. `--platform=` to override `laravel`.   |
 | `watchtower:project rotate-key {id\|slug}`  | Issue a fresh public key.                                           |
+| `watchtower:project mcp-token {id\|slug}`   | Mint (or replace) the project's MCP token; shown once.              |
 | `watchtower:project activate/deactivate`    | Stop or resume accepting events for one project.                    |
 | `watchtower:prune`                          | Drop events past retention (scheduled daily on its own).            |
 | `watchtower:test`                           | Print the resolved config and send a test exception and envelope.  |
@@ -208,17 +209,23 @@ are set per project in the UI (Alerts) and go to the addresses listed on each ru
 
 ## MCP
 
-Install `laravel/mcp` and the server is mounted at `/{prefix}/mcp`. It authenticates with any active project's public
-key, as `Authorization: Bearer {public_key}` or `?api_key=`, and every tool is scoped to that project:
+Install `laravel/mcp` and the server is mounted at `/{prefix}/mcp`. It authenticates with a project's MCP token, as
+`Authorization: Bearer {token}` or `?api_key=`, and every tool is scoped to that project:
 `list_issues`, `get_issue`, `list_events`, `get_event`, `get_stats`, `resolve_issue`, `ignore_issue`,
 `unresolve_issue`, `snooze_issue`.
 
 ```bash
 claude mcp add --transport http --scope project watchtower https://your-app.test/watchtower/mcp \
-  --header "Authorization: Bearer {public_key}"
+  --header 'Authorization: Bearer ${WATCHTOWER_MCP_TOKEN}'
 ```
 
-`watchtower:install` runs this for you when the `claude` CLI is on PATH.
+`watchtower:install` mints the first project's token, prints it once, and runs this for you when the `claude` CLI is on
+PATH. Mint or replace a token with `watchtower:project mcp-token {id|slug}`; only its hash is stored. Export it as
+`WATCHTOWER_MCP_TOKEN` in the shell Claude Code starts from: `.mcp.json` keeps the variable name, never the token.
+
+The public key in a DSN ships to every browser, so it is not a read credential. Until you set
+`WATCHTOWER_MCP_LEGACY_KEYS=false`, the server still accepts it with a logged deprecation, so upgrading never breaks an
+existing `.mcp.json`. The default flips to `false` in the next major release.
 
 ## Relay and dual mode
 
@@ -258,6 +265,7 @@ job completes, so an outage never leaves envelope bodies in `failed_jobs`.
 | `WATCHTOWER_UI_LOGIN_ROUTE`   | `login`                     | Route name or URL guests are redirected to; empty 403s instead.  |
 | `WATCHTOWER_UI_THEME`         | `auto`                      | `auto` goes dark under the host's `.dark` class; `light` or `dark` pins it. |
 | `WATCHTOWER_MCP_ENABLED`      | `true`                      | Mount the MCP server (needs `laravel/mcp`).                      |
+| `WATCHTOWER_MCP_LEGACY_KEYS`  | `true`                      | Also accept a project's public DSN key on the MCP server (deprecated). |
 | `WATCHTOWER_QUEUE_CONNECTION` | _(default connection)_      | Queue connection for `ProcessEventJob` and alert mail.           |
 | `WATCHTOWER_QUEUE_NAME`       | _(default queue)_           | Queue for `ProcessEventJob` and alert mail. Recommended: `watchtower`. |
 | `WATCHTOWER_RATE_LIMIT_PER_MIN` | `300`                     | Events per minute per project, on every ingest path.             |
