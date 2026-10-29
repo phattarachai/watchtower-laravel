@@ -290,6 +290,25 @@ job completes, so an outage never leaves envelope bodies in `failed_jobs`.
 
 The ignored exceptions, the scrubbed keys and the user fields sent are arrays in `config/watchtower.php`.
 
+### Secrets in URLs
+
+The SDK filter also scrubs `request.url` and `request.query_string`, on error events and on sampled transactions.
+A query value whose key is in `before_send.scrub_keys` becomes `[Filtered]` (`?token=abc` → `?token=[Filtered]`),
+and so does a signed URL's `signature`. A secret in the URL path, such as a feed token that has to sit in the link
+because the client can't send headers, needs a regex in `before_send.scrub_url_patterns`. Each match is replaced,
+so use `\K` to keep the prefix:
+
+```php
+'before_send' => [
+    // …
+    'scrub_url_patterns' => [
+        '#/feeds/\K[^/?]+#', // /feeds/s3cr3t/orders.csv → /feeds/[Filtered]/orders.csv
+    ],
+],
+```
+
+The list ships empty. A pattern that fails to compile filters the whole URL instead of letting it through.
+
 ## Upgrading
 
 ```bash

@@ -30,6 +30,14 @@ class BeforeSend
      */
     public const array ALWAYS_SCRUBBED_KEYS = ['x-csrf-token', 'x-xsrf-token', '_token'];
 
+    /**
+     * Query keys scrubbed from `request.url` and `request.query_string` on top
+     * of `scrub_keys`: a Laravel signed URL is usable by whoever holds it.
+     *
+     * @var list<string>
+     */
+    public const array ALWAYS_SCRUBBED_QUERY_KEYS = ['signature'];
+
     public function __invoke(Event $event, ?EventHint $hint = null): ?Event
     {
         if (config('watchtower.before_send.enabled') === false) {
@@ -43,6 +51,20 @@ class BeforeSend
         $this->scrubEvent($event);
 
         return $event;
+    }
+
+    /**
+     * The `before_send_transaction` hook. A sampled transaction carries the
+     * same request as an error event, so it gets the same scrub, but it has no
+     * exception to drop it by.
+     */
+    public function transaction(Event $transaction, ?EventHint $hint = null): Event
+    {
+        if (config('watchtower.before_send.enabled') !== false) {
+            $this->scrubEvent($transaction);
+        }
+
+        return $transaction;
     }
 
     private function shouldDrop(?EventHint $hint): bool
@@ -73,6 +95,14 @@ class BeforeSend
         $request = $event->getRequest();
 
         if ($request !== []) {
+            if (isset($request['url']) && is_string($request['url'])) {
+                $request['url'] = $this->scrubUrl($request['url']);
+            }
+
+            if (isset($request['query_string']) && is_string($request['query_string'])) {
+                $request['query_string'] = $this->scrubUrlPatterns($this->scrubQueryString($request['query_string']));
+            }
+
             if (isset($request['data']) && is_array($request['data'])) {
                 $request['data'] = $this->scrubArray($request['data']);
             }
@@ -124,6 +154,64 @@ class BeforeSend
         }
 
         return $values;
+    }
+
+    private function scrubUrl(string $url): string
+    {
+        [$withoutFragment, $fragment] = array_pad(explode('#', $url, 2), 2, null);
+        [$base, $query] = array_pad(explode('?', $withoutFragment, 2), 2, null);
+
+        $scrubbed = $query === null ? $base : $base.'?'.$this->scrubQueryString($query);
+
+        return $this->scrubUrlPatterns($fragment === null ? $scrubbed : $scrubbed.'#'.$fragment);
+    }
+
+    /**
+     * Rewrites only the values whose key, or any bracketed segment of it
+     * (`user[token]`), is a scrub key; every other pair keeps its encoding.
+     */
+    private function scrubQueryString(string $query): string
+    {
+        $keys = [...$this->normalizedScrubKeys(), ...self::ALWAYS_SCRUBBED_QUERY_KEYS];
+        $pairs = explode('&', $query);
+
+        foreach ($pairs as $index => $pair) {
+            if (! str_contains($pair, '=')) {
+                continue;
+            }
+
+            $name = strstr($pair, '=', true);
+            $segments = preg_split('/[\[\]]+/', strtolower(urldecode($name)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+            if (array_intersect($segments, $keys) !== []) {
+                $pairs[$index] = $name.'='.self::REDACTED;
+            }
+        }
+
+        return implode('&', $pairs);
+    }
+
+    /**
+     * A pattern that does not compile filters the whole value rather than let
+     * the token it was written for through.
+     */
+    private function scrubUrlPatterns(string $value): string
+    {
+        foreach ((array) config('watchtower.before_send.scrub_url_patterns', []) as $pattern) {
+            if (! is_string($pattern) || $pattern === '') {
+                continue;
+            }
+
+            $scrubbed = @preg_replace($pattern, self::REDACTED, $value);
+
+            if ($scrubbed === null) {
+                return self::REDACTED;
+            }
+
+            $value = $scrubbed;
+        }
+
+        return $value;
     }
 
     private function scrubCardShapes(string $value): string

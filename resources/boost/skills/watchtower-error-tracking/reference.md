@@ -119,7 +119,7 @@ Both paths go through one forwarder that:
 | `SENTRY_BREADCRUMBS_HTTP_CLIENT_REQUESTS_ENABLED` | (`true` after install) | Sentry SDK key. Outbound HTTP crumbs via Laravel's HTTP client. |
 | `SENTRY_BREADCRUMBS_REDIS_COMMANDS_ENABLED` | (`true` after install) | Sentry SDK key. Redis command crumbs. |
 
-Two more knobs live in `config/watchtower.php` only (arrays — too much for an env var): `watchtower.user_context.fields` (see [User context middleware](#user-context-middleware) below) and `watchtower.before_send.{ignored_exceptions, scrub_keys}` (see [BeforeSend pipeline](#beforesend-pipeline) below).
+Two more knobs live in `config/watchtower.php` only (arrays — too much for an env var): `watchtower.user_context.fields` (see [User context middleware](#user-context-middleware) below) and `watchtower.before_send.{ignored_exceptions, scrub_keys, scrub_url_patterns}` (see [BeforeSend pipeline](#beforesend-pipeline) below).
 
 ## Standalone / dual mode (embedded server)
 
@@ -306,7 +306,7 @@ Result in Watchtower: `IssueDetail` → User tab shows id / email / username / i
 
 ### BeforeSend pipeline
 
-`Phattarachai\WatchtowerLaravel\Sentry\BeforeSend` is chained in front of any existing `before_send` callback from `config/sentry.php` at service-provider boot. Composition order: ours runs first (drop + scrub); if the event survives, the user's existing callback runs after. Either can return `null` to drop.
+`Phattarachai\WatchtowerLaravel\Sentry\BeforeSend` is chained in front of any existing `before_send` callback from `config/sentry.php` at service-provider boot. Composition order: ours runs first (drop + scrub); if the event survives, the user's existing callback runs after. Either can return `null` to drop. The same scrub (never the drop) is chained in front of `before_send_transaction`, so sampled transactions leave the SDK scrubbed too. Keep any host callback in `config/sentry.php` as a `[Class::class, 'method']` array: a closure breaks `php artisan optimize`.
 
 Two responsibilities:
 
@@ -336,6 +336,8 @@ credit_card, card, cvv, cvc
 ```
 
 `x-csrf-token`, `x-xsrf-token` and `_token` are scrubbed even when a published config predates them. The Sentry SDK filters only `Authorization` and `Cookie` headers, so otherwise the CSRF token that Inertia and axios send on every request would reach the event. Every value in `event.request.cookies` becomes `[Filtered]`; the cookie names are kept.
+
+**Scrub URLs.** In `event.request.url` and `event.request.query_string`, a query value whose key (or any bracketed segment of it, `user[token]`) matches `scrub_keys` becomes `[Filtered]`; a signed URL's `signature` always does. Every match of a regex in `watchtower.before_send.scrub_url_patterns` (default `[]`) is replaced with `[Filtered]` too — that is how to hide a token that lives in the URL path, e.g. `'#/feeds/\K[^/?]+#'` turns `/feeds/s3cr3t/orders.csv` into `/feeds/[Filtered]/orders.csv` (`\K` keeps the prefix). A pattern that does not compile filters the whole value.
 
 Then a credit-card-shape regex (`/\b\d(?:[ -]?\d){12,18}\b/`) sweeps the remaining string values and replaces any 13–19-digit number with `[Filtered]`. Intentionally permissive — false positives just redact an innocent number; false negatives leak a real card.
 

@@ -272,8 +272,9 @@ class WatchtowerServiceProvider extends ServiceProvider
 
     /**
      * Chain our callbacks in front of whatever the user already configured in
-     * config/sentry.php. Runs after the Sentry SDK provider has booted so the
-     * client is built — we then mutate its Options in place.
+     * config/sentry.php, for error events and sampled transactions alike. Runs
+     * after the Sentry SDK provider has booted so the client is built — we then
+     * mutate its Options in place.
      *
      * The self-capture guard runs first and is not switched off by
      * `before_send.enabled`: it is what stops a failing Watchtower job from
@@ -306,6 +307,18 @@ class WatchtowerServiceProvider extends ServiceProvider
                 }
 
                 return $existing ? $existing($event, $hint) : $event;
+            });
+
+            $existingTransaction = $options->getBeforeSendTransactionCallback();
+
+            $options->setBeforeSendTransactionCallback(function ($transaction, $hint) use ($guard, $ours, $existingTransaction) {
+                if ($guard->shouldDrop(null)) {
+                    return null;
+                }
+
+                $transaction = $ours === null ? $transaction : $ours->transaction($transaction, $hint);
+
+                return $existingTransaction($transaction, $hint);
             });
         });
     }

@@ -13,6 +13,7 @@ use Phattarachai\WatchtowerLaravel\Tests\LegacyConfigTestCase;
 use Phattarachai\WatchtowerLaravel\Tests\RelayWithoutInertiaTestCase;
 use Phattarachai\WatchtowerLaravel\Tests\SelfCaptureLoopbackTestCase;
 use Phattarachai\WatchtowerLaravel\Tests\SelfCaptureTestCase;
+use Phattarachai\WatchtowerLaravel\Tests\SentryHooksTestCase;
 use Phattarachai\WatchtowerLaravel\Tests\ServerTestCase;
 use Phattarachai\WatchtowerLaravel\Tests\Support\SentryEnvelope;
 use Phattarachai\WatchtowerLaravel\Tests\TestCase;
@@ -27,6 +28,7 @@ uses(SelfCaptureLoopbackTestCase::class, RefreshDatabase::class)->in('SelfCaptur
 uses(WithoutInertiaTestCase::class, RefreshDatabase::class)->in('WithoutInertia');
 uses(RelayWithoutInertiaTestCase::class)->in('RelayWithoutInertia');
 uses(LegacyConfigTestCase::class)->in('LegacyConfig');
+uses(SentryHooksTestCase::class)->in('SentryHooks');
 
 /**
  * @param  array<string, mixed>  $attributes
