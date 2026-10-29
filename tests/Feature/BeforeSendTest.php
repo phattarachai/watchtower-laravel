@@ -50,6 +50,7 @@ beforeEach(function (): void {
     config(['watchtower.before_send.scrub_keys' => [
         'password', 'password_confirmation', 'authorization', 'cookie',
     ]]);
+    config(['watchtower.before_send.scrub_url_patterns' => []]);
 });
 
 it('drops events whose exception is in the ignored list', function (): void {
@@ -232,4 +233,100 @@ it('keeps cookie names but filters every cookie value', function (): void {
     $cookies = (new BeforeSend)($event, hintFor(new RuntimeException))->getRequest()['cookies'];
 
     expect($cookies)->toBe(['laravel_session' => '[Filtered]', 'XSRF-TOKEN' => '[Filtered]', 'appearance' => '[Filtered]']);
+});
+
+it('redacts scrub_keys values in the query of request.url and request.query_string', function (): void {
+    config(['watchtower.before_send.scrub_keys' => ['token', 'api_key']]);
+    $event = makeRequestEvent([
+        'url' => 'https://shop.example.com/orders?page=2&token=abc123&API_KEY=k-9',
+        'query_string' => 'page=2&token=abc123&API_KEY=k-9',
+    ]);
+
+    $request = (new BeforeSend)($event, hintFor(new RuntimeException))->getRequest();
+
+    expect($request['url'])->toBe('https://shop.example.com/orders?page=2&token=[Filtered]&API_KEY=[Filtered]')
+        ->and($request['query_string'])->toBe('page=2&token=[Filtered]&API_KEY=[Filtered]');
+});
+
+it('matches encoded and bracketed query keys and leaves a key without a value alone', function (): void {
+    config(['watchtower.before_send.scrub_keys' => ['token']]);
+    $event = makeRequestEvent([
+        'query_string' => 'user%5Btoken%5D=abc&tokens[]=keep&token&q=a+b',
+    ]);
+
+    $request = (new BeforeSend)($event, hintFor(new RuntimeException))->getRequest();
+
+    expect($request['query_string'])->toBe('user%5Btoken%5D=[Filtered]&tokens[]=keep&token&q=a+b');
+});
+
+it('always redacts a signed URL signature, whatever scrub_keys says', function (): void {
+    config(['watchtower.before_send.scrub_keys' => ['password']]);
+    $event = makeRequestEvent([
+        'url' => 'https://shop.example.com/unsubscribe/7?expires=1767225600&signature=4f9e2c',
+    ]);
+
+    $request = (new BeforeSend)($event, hintFor(new RuntimeException))->getRequest();
+
+    expect($request['url'])->toBe('https://shop.example.com/unsubscribe/7?expires=1767225600&signature=[Filtered]');
+});
+
+it('replaces scrub_url_patterns matches in the URL path', function (): void {
+    config(['watchtower.before_send.scrub_url_patterns' => ['#/feeds/\K[^/?]+#']]);
+    $event = makeRequestEvent([
+        'url' => 'https://shop.example.com/feeds/s3cr3t-feed-token/orders.csv?page=1',
+        'query_string' => 'page=1',
+    ]);
+
+    $request = (new BeforeSend)($event, hintFor(new RuntimeException))->getRequest();
+
+    expect($request['url'])->toBe('https://shop.example.com/feeds/[Filtered]/orders.csv?page=1')
+        ->and($request['query_string'])->toBe('page=1');
+});
+
+it('leaves the URL path alone when no scrub_url_patterns are set', function (): void {
+    config(['watchtower.before_send.scrub_url_patterns' => []]);
+    $event = makeRequestEvent(['url' => 'https://shop.example.com/feeds/abc/orders.csv']);
+
+    $request = (new BeforeSend)($event, hintFor(new RuntimeException))->getRequest();
+
+    expect($request['url'])->toBe('https://shop.example.com/feeds/abc/orders.csv');
+});
+
+it('filters the whole URL when a scrub_url_patterns entry does not compile', function (): void {
+    config(['watchtower.before_send.scrub_url_patterns' => ['#/feeds/[^/?+']]);
+    $event = makeRequestEvent([
+        'url' => 'https://shop.example.com/feeds/s3cr3t-feed-token/orders.csv',
+        'query_string' => 'page=1',
+    ]);
+
+    $request = (new BeforeSend)($event, hintFor(new RuntimeException))->getRequest();
+
+    expect($request['url'])->toBe('[Filtered]')
+        ->and($request['query_string'])->toBe('[Filtered]');
+});
+
+it('scrubs a transaction like an error event but never drops it', function (): void {
+    config(['watchtower.before_send.scrub_keys' => ['token', 'authorization']]);
+    config(['watchtower.before_send.scrub_url_patterns' => ['#/feeds/\K[^/?]+#']]);
+    $transaction = Event::createTransaction();
+    $transaction->setRequest([
+        'url' => 'https://shop.example.com/feeds/s3cr3t-feed-token/orders.csv?token=abc',
+        'headers' => ['Authorization' => 'Bearer secret-token'],
+    ]);
+
+    $result = (new BeforeSend)->transaction($transaction, hintFor(new NotFoundHttpException));
+
+    expect($result)->toBe($transaction)
+        ->and($result->getRequest()['url'])->toBe('https://shop.example.com/feeds/[Filtered]/orders.csv?token=[Filtered]')
+        ->and($result->getRequest()['headers']['Authorization'])->toBe('[Filtered]');
+});
+
+it('leaves a transaction untouched when disabled', function (): void {
+    config(['watchtower.before_send.enabled' => false]);
+    $transaction = Event::createTransaction();
+    $transaction->setRequest(['url' => 'https://shop.example.com/orders?token=abc']);
+
+    $result = (new BeforeSend)->transaction($transaction);
+
+    expect($result->getRequest()['url'])->toBe('https://shop.example.com/orders?token=abc');
 });

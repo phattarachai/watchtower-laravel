@@ -37,6 +37,18 @@ it('still scrubs the CSRF headers and form token at the SDK under the 1.4 config
         ->and($request['data']['_token'])->toBe('[Filtered]');
 });
 
+it('fills an empty scrub_url_patterns and still scrubs URL query tokens under the 1.4 config', function (): void {
+    $event = Event::createEvent();
+    $event->setRequest(['url' => 'https://shop.example.com/orders?token=abc&signature=4f9e2c&page=2']);
+    $hint = new EventHint;
+    $hint->exception = new RuntimeException;
+
+    $request = (new BeforeSend)($event, $hint)->getRequest();
+
+    expect(config('watchtower.before_send.scrub_url_patterns'))->toBe([])
+        ->and($request['url'])->toBe('https://shop.example.com/orders?token=[Filtered]&signature=[Filtered]&page=2');
+});
+
 it('still scrubs the CSRF headers and form token at ingest under the 1.4 config', function (): void {
     $prepared = app(EventPipeline::class)->prepare([
         'event_id' => str_repeat('a', 32),

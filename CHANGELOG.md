@@ -9,6 +9,15 @@ This file records anything released before that automation landed.
 
 ## Upgrade notes
 
+### 1.8.0
+
+- **URLs are scrubbed at the SDK.** A query value whose key is in `before_send.scrub_keys`, and a signed URL's
+  `signature`, become `[Filtered]` in `request.url` and `request.query_string`. A token in the URL path needs a regex
+  in the new `before_send.scrub_url_patterns` (empty by default; an older published config gets the empty list).
+- **Sampled transactions are scrubbed too.** The package now chains `before_send_transaction` the way it chains
+  `before_send`, ahead of any callback in `config/sentry.php`. An app-level callback that only redacted a URL token
+  can move into `scrub_url_patterns`.
+
 ### 1.7.0
 
 - **The MCP server stops treating the public DSN key as a read credential.** That key ships to every browser in

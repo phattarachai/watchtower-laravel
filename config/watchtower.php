@@ -204,5 +204,14 @@ return [
             'x-csrf-token', 'x-xsrf-token',
             'credit_card', 'card', 'cvv', 'cvc',
         ],
+
+        // The same keys are scrubbed from query strings in event.request.url
+        // and event.request.query_string (`?token=…` becomes
+        // `?token=[Filtered]`), and a signed URL's `signature` always is.
+        // A secret in the URL *path* needs a regex here: each match in
+        // request.url / request.query_string becomes '[Filtered]', on error
+        // events and sampled transactions alike. Use \K to keep the prefix:
+        //   '#/feeds/\K[^/?]+#'  →  /feeds/[Filtered]/orders.csv
+        'scrub_url_patterns' => [],
     ],
 ];
