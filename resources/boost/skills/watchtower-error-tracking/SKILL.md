@@ -1,7 +1,7 @@
 ---
 name: watchtower-error-tracking
-description: "Wire up Watchtower (a self-hosted, Sentry-compatible exception tracker) into a Laravel or browser app, and connect Claude Code to its MCP server for in-conversation issue triage. Triggers on \"Watchtower\", \"set up error tracking\", \"verify the exception was reported\", WATCHTOWER_DSN, SENTRY_LARAVEL_DSN, or VITE_SENTRY_DSN."
-version: 2026.10.26.1
+description: "Wire Watchtower (self-hosted, Sentry-compatible) into a Laravel or browser app, and triage its issues over MCP, down to sweeping the production inbox. Triggers on \"Watchtower\", \"set up error tracking\", \"sweep production issues\", \"verify the exception was reported\", WATCHTOWER_DSN, or SENTRY_LARAVEL_DSN."
+version: 2026.10.31.1
 ---
 
 # Watchtower error tracking
@@ -214,3 +214,13 @@ claude mcp add --transport http --scope project watchtower https://shop.test/wat
 - `mcp__watchtower__get_stats` — volumes, top issues, status mix; useful for "what's noisy right now?" questions.
 
 Full arg + return reference, plus the end-to-end verify and debug flows: `reference.md` § "Querying via MCP".
+
+## Sweeping the production inbox
+
+When asked to check or clean up production as a whole, not one issue, follow [`sweep.md`](sweep.md):
+pull every unresolved production issue, read one event each (`jq` on the saved payload — full events
+overrun the MCP output limit), sort each into probe bot / real bug / navigation race / transient upstream
+/ link scanner / stale, then report a grouped table before touching any status.
+
+Two habits it depends on: don't ignore probe-bot issues (resolve them once the block is deployed), and
+don't trust `top_frame` on a PHP event — it is usually the outermost middleware, not the cause.
