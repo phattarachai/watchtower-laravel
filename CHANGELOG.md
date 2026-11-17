@@ -9,7 +9,7 @@ This file records anything released before that automation landed.
 
 ## Upgrade notes
 
-### Unreleased
+### 1.9.0
 
 - **Session Replay, relay mode only, off by default.** Set `WATCHTOWER_REPLAY_ON_ERROR_SAMPLE_RATE` (or
   `WATCHTOWER_REPLAY_SESSION_SAMPLE_RATE`) above 0 and turn on the project's replay switch on the central Watchtower.
