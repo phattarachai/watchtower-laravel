@@ -106,7 +106,8 @@ php artisan watchtower:doctor
 ```
 
 The doctor checks the tables, the routes, the UI wiring (Inertia, the page stub, the Vite alias, the Tailwind
-lines), the mailer, the queue and Horizon, Redis memory, the MCP server and the self-capture path. Anything missing
+lines), the mailer, the queue and Horizon, Redis memory, the MCP server, the self-capture path and the Session Replay
+setting. Anything missing
 is reported by name. It exits non-zero while something still needs fixing, so you can run it in CI.
 
 ## Commands
@@ -250,6 +251,44 @@ Set `WATCHTOWER_RELAY_ASYNC=true` to forward through a queued `ForwardEnvelope` 
 retried twice with backoff. A 4xx (including 429) is dropped. After the last attempt the failure is logged and the
 job completes, so an outage never leaves envelope bodies in `failed_jobs`.
 
+### Session Replay
+
+In `relay` mode the browser SDK can also record a Session Replay, a masked recording of the page that the central
+Watchtower stores and plays next to the issue. It is off by default. Turn on the project's replay switch on the server,
+then set a rate:
+
+```dotenv
+WATCHTOWER_REPLAY_ON_ERROR_SAMPLE_RATE=1.0   # keep the minute before an error
+WATCHTOWER_REPLAY_SESSION_SAMPLE_RATE=0      # share of all visits recorded from the start
+```
+
+After upgrading, re-publish the browser helper: `php artisan vendor:publish --tag=watchtower-js --force`.
+
+- `@watchtowerUser` (and the Filament render hook that renders it) adds `<meta name="watchtower-replay">` with the rates.
+  `initWatchtower()` loads the replay code as a separate chunk only when that tag is present, so an app with both rates
+  at 0 downloads none of it.
+- The recording masks all text and inputs and blocks media (the SDK defaults), and also masks Livewire's
+  `wire:snapshot` / `wire:effects` and Inertia's `data-page` attributes, which hold the page's server state.
+  **Never loosen `maskAllText` or `maskAllInputs`, never add `unmask` selectors, and keep `networkDetailAllowUrls`
+  empty in a customer-facing app.**
+- While a replay runs, same-origin `fetch` and XHR requests (Livewire, Inertia, axios) carry
+  `X-Watchtower-Replay-Id`. `WatchtowerUserContext` puts it on the PHP event as the `replayId` tag, so a server error
+  links to the replay. A response of 500 or more flushes the replay, so an on-error replay is kept even when the browser
+  threw nothing. 419 and 422 never do.
+- Veto routes or users with a callback. It runs on every full page load. An Inertia or `wire:navigate` visit keeps
+  recording until the next full load:
+
+  ```php
+  Watchtower::recordReplaysWhen(fn (Request $request): bool => ! $request->routeIs('checkout.*', 'consent.*'));
+  ```
+
+- The relay forwards replay segments synchronously even with `WATCHTOWER_RELAY_ASYNC=true`, so they never sit in your
+  queue, and passes their bytes through as received. A segment can be up to 5 MB: set nginx `client_max_body_size` and
+  PHP `post_max_size` to at least `5M`.
+- `standalone` and `dual` never start a replay. The embedded server answers replay envelopes with
+  `429` + `X-Sentry-Rate-Limits: 3600:replay:project`, which stops the SDK recording without touching error events.
+  `watchtower:doctor` warns when a rate is set in those modes.
+
 ## Configuration
 
 | Env key                       | Default                     | Purpose                                                          |
@@ -287,6 +326,8 @@ job completes, so an outage never leaves envelope bodies in `failed_jobs`.
 | `WATCHTOWER_VERIFY_SSL`       | `true`                      | Verify the upstream TLS certificate.                             |
 | `WATCHTOWER_CONNECT_TIMEOUT`  | `3`                         | Guzzle connect timeout (seconds).                                |
 | `WATCHTOWER_FORWARD_GZIP`     | `true`                      | gzip uncompressed envelopes (≥ 1 KB) before forwarding upstream. |
+| `WATCHTOWER_REPLAY_SESSION_SAMPLE_RATE` | `0`               | Share of visits recorded as a Session Replay, 0..1 (relay mode only). |
+| `WATCHTOWER_REPLAY_ON_ERROR_SAMPLE_RATE` | `0`              | Share of errors that keep the replay leading up to them, 0..1 (relay mode only). |
 
 The ignored exceptions, the scrubbed keys and the user fields sent are arrays in `config/watchtower.php`.
 

@@ -36,6 +36,7 @@ use Phattarachai\WatchtowerLaravel\Server\Sentry\LocalTransport;
 use Phattarachai\WatchtowerLaravel\Server\Ui\UiPage;
 use Phattarachai\WatchtowerLaravel\Support\EmbeddedUiPatcher;
 use Phattarachai\WatchtowerLaravel\Support\EnvelopeForwarder;
+use Phattarachai\WatchtowerLaravel\Support\ReplayConfig;
 use Sentry\ClientBuilder;
 use Sentry\SentrySdk;
 use Sentry\Serializer\PayloadSerializer;
@@ -180,6 +181,9 @@ class WatchtowerServiceProvider extends ServiceProvider
             __DIR__.'/../resources/js/watchtower.js' => resource_path('js/vendor/watchtower.js'),
             __DIR__.'/../resources/js/livewire.js' => resource_path('js/vendor/livewire.js'),
             __DIR__.'/../resources/js/noise.js' => resource_path('js/vendor/noise.js'),
+            __DIR__.'/../resources/js/replay-config.js' => resource_path('js/vendor/replay-config.js'),
+            __DIR__.'/../resources/js/replay-integration.js' => resource_path('js/vendor/replay-integration.js'),
+            __DIR__.'/../resources/js/replay-link.js' => resource_path('js/vendor/replay-link.js'),
         ], 'watchtower-js');
 
         // Only the page needs to live in the host tree — `app.jsx`'s
@@ -199,7 +203,7 @@ class WatchtowerServiceProvider extends ServiceProvider
             __DIR__.'/../resources/views' => resource_path('views/vendor/watchtower'),
         ], 'watchtower-views');
 
-        Blade::directive('watchtowerUser', fn (): string => "<?php echo view('watchtower::user-meta')->render(); ?>");
+        Blade::directive('watchtowerUser', fn (): string => "<?php echo view('watchtower::user-meta')->render(); echo view('watchtower::replay-meta')->render(); ?>");
 
         if (config('watchtower.relay.enabled', true)) {
             $this->loadRoutesFrom(__DIR__.'/../routes/api.php');
@@ -325,7 +329,7 @@ class WatchtowerServiceProvider extends ServiceProvider
 
     private function registerUserContextMiddleware(): void
     {
-        if (config('watchtower.user_context.enabled') === false) {
+        if (config('watchtower.user_context.enabled') === false && ! ReplayConfig::enabled()) {
             return;
         }
 

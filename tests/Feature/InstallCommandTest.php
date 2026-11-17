@@ -67,6 +67,9 @@ afterEach(function (): void {
     @unlink(resource_path('js/vendor/watchtower.js'));
     @unlink(resource_path('js/vendor/livewire.js'));
     @unlink(resource_path('js/vendor/noise.js'));
+    @unlink(resource_path('js/vendor/replay-config.js'));
+    @unlink(resource_path('js/vendor/replay-integration.js'));
+    @unlink(resource_path('js/vendor/replay-link.js'));
     @rmdir(resource_path('js/vendor'));
     @rmdir(resource_path('js'));
 
@@ -470,4 +473,30 @@ it('prints a Filament render-hook block when a panel provider exists', function 
     @rmdir(base_path('app/Providers/Filament'));
     @rmdir(base_path('app/Providers'));
     @rmdir(base_path('app'));
+});
+
+it('writes the replay rate keys switched off, and keeps values already set', function (): void {
+    file_put_contents($this->envPath, "APP_NAME=Testing\nWATCHTOWER_REPLAY_ON_ERROR_SAMPLE_RATE=1.0\n");
+
+    $this->artisan('watchtower:install', ['--dsn' => 'http://abc@watchtower.test/42', '--no-mcp' => true])
+        ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'no')
+        ->assertExitCode(0);
+
+    $env = (string) file_get_contents($this->envPath);
+
+    expect($env)->toContain('WATCHTOWER_REPLAY_SESSION_SAMPLE_RATE=0')
+        ->and($env)->toContain('WATCHTOWER_REPLAY_ON_ERROR_SAMPLE_RATE=1.0')
+        ->and(substr_count($env, 'WATCHTOWER_REPLAY_ON_ERROR_SAMPLE_RATE='))->toBe(1);
+});
+
+it('publishes the replay modules with the browser helper', function (): void {
+    file_put_contents(base_path('vite.config.js'), "export default {};\n");
+
+    $this->artisan('watchtower:install', ['--dsn' => 'http://abc@watchtower.test/42', '--no-mcp' => true])
+        ->expectsConfirmation(InstallCommand::PII_CONFIRM_QUESTION, 'no')
+        ->assertExitCode(0);
+
+    foreach (['watchtower.js', 'replay-config.js', 'replay-integration.js', 'replay-link.js'] as $file) {
+        expect(resource_path("js/vendor/{$file}"))->toBeFile();
+    }
 });

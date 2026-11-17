@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Phattarachai\WatchtowerLaravel\Server;
 
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Phattarachai\WatchtowerCore\Ingest\EventPipeline;
 use Phattarachai\WatchtowerCore\Sentry\EnvelopeItem;
@@ -14,6 +15,7 @@ use Phattarachai\WatchtowerLaravel\Server\Ingest\IngestThrottle;
 use Phattarachai\WatchtowerLaravel\Server\Ingest\QueueBackpressure;
 use Phattarachai\WatchtowerLaravel\Server\Jobs\ProcessEventJob;
 use Phattarachai\WatchtowerLaravel\Server\Models\Project;
+use Phattarachai\WatchtowerLaravel\Support\ReplayEnvelope;
 
 /**
  * Shared entry point for embedded ingest: both the dedicated `/…/envelope`
@@ -21,6 +23,8 @@ use Phattarachai\WatchtowerLaravel\Server\Models\Project;
  */
 class EnvelopeAccepter
 {
+    private const int REPLAY_REFUSAL_SECONDS = 3600;
+
     public function __construct(
         private readonly EnvelopeParser $parser,
         private readonly IngestThrottle $throttle,
@@ -59,6 +63,20 @@ class EnvelopeAccepter
         }
 
         return (string) ($envelope['header']['event_id'] ?? '');
+    }
+
+    /**
+     * @param  array{header: array<string, mixed>, items: array<int, EnvelopeItem>}  $envelope
+     */
+    public function respond(array $envelope, string $eventId): JsonResponse
+    {
+        if (! ReplayEnvelope::containsReplay($envelope['items'])) {
+            return new JsonResponse(['id' => $eventId]);
+        }
+
+        return new JsonResponse(['error' => 'replay_not_supported'], 429, [
+            'X-Sentry-Rate-Limits' => self::REPLAY_REFUSAL_SECONDS.':replay:project',
+        ]);
     }
 
     /**

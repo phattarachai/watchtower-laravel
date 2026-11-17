@@ -24,9 +24,7 @@ class IngestController
 
         $envelope = $this->accepter->parse($this->accepter->body($request));
 
-        return new JsonResponse([
-            'id' => $this->accepter->ingest($project, $envelope, $this->sdkName($request, $envelope['header'])),
-        ]);
+        return $this->accepter->respond($envelope, $this->accepter->ingest($project, $envelope, $this->sdkName($request, $envelope['header'])));
     }
 
     /**

@@ -17,6 +17,7 @@ use Phattarachai\WatchtowerLaravel\Support\FilamentPanelDetector;
 use Phattarachai\WatchtowerLaravel\Support\FrontendPatcher;
 use Phattarachai\WatchtowerLaravel\Support\LayoutDetector;
 use Phattarachai\WatchtowerLaravel\Support\PackageManagerDetector;
+use Phattarachai\WatchtowerLaravel\Support\ReplayConfig;
 use Phattarachai\WatchtowerLaravel\Support\ViteEntryDetector;
 use Symfony\Component\Console\Output\OutputInterface;
 
@@ -31,6 +32,11 @@ class InstallCommand extends Command
         'SENTRY_BREADCRUMBS_CACHE_ENABLED' => 'true',
         'SENTRY_BREADCRUMBS_HTTP_CLIENT_REQUESTS_ENABLED' => 'true',
         'SENTRY_BREADCRUMBS_REDIS_COMMANDS_ENABLED' => 'true',
+    ];
+
+    private const array REPLAY_KEYS = [
+        'WATCHTOWER_REPLAY_SESSION_SAMPLE_RATE' => '0',
+        'WATCHTOWER_REPLAY_ON_ERROR_SAMPLE_RATE' => '0',
     ];
 
     /** @var list<string> */
@@ -94,6 +100,7 @@ class InstallCommand extends Command
         $this->patchBootstrap($dryRun);
         $this->publishConfig($dryRun);
         $this->configureFrontend($dsn, $dryRun);
+        $this->writeReplayEnvKeys($dryRun);
         $this->installMcp($dsn, $dryRun);
         $this->emitClosing($dryRun);
 
@@ -607,6 +614,27 @@ class InstallCommand extends Command
         }
 
         $this->info('Wrote '.count($written).' breadcrumb key(s) to .env: '.implode(', ', $written));
+    }
+
+    private function writeReplayEnvKeys(bool $dryRun): void
+    {
+        if ($dryRun) {
+            $this->line('Would set in .env (if absent): '.implode(', ', array_keys(self::REPLAY_KEYS)));
+
+            return;
+        }
+
+        foreach (array_filter([base_path('.env'), base_path('.env.example')], is_file(...)) as $path) {
+            $env = new EnvWriter($path);
+
+            foreach (self::REPLAY_KEYS as $key => $value) {
+                $env->setIfAbsent($key, $value);
+            }
+        }
+
+        $this->line(ReplayConfig::configured()
+            ? 'Session Replay is on: re-publish the browser helper with `php artisan vendor:publish --tag=watchtower-js --force` after an upgrade.'
+            : 'Session Replay is off. To record, set WATCHTOWER_REPLAY_ON_ERROR_SAMPLE_RATE=1.0 and turn on the project\'s replay switch on the central Watchtower.');
     }
 
     private function patchBootstrap(bool $dryRun): void

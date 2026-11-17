@@ -12,6 +12,7 @@ use Phattarachai\WatchtowerLaravel\Jobs\ForwardEnvelope;
 use Phattarachai\WatchtowerLaravel\Server\EnvelopeAccepter;
 use Phattarachai\WatchtowerLaravel\Support\Dsn;
 use Phattarachai\WatchtowerLaravel\Support\EnvelopeForwarder;
+use Phattarachai\WatchtowerLaravel\Support\ReplayEnvelope;
 use Phattarachai\WatchtowerLaravel\Watchtower;
 
 class RelayController
@@ -37,7 +38,11 @@ class RelayController
 
         $local = $this->ingestLocally($request);
 
-        return $mode === 'dual' ? $this->relay($request) : $local;
+        if ($mode !== 'dual' || $local->getStatusCode() === 429) {
+            return $local;
+        }
+
+        return $this->relay($request);
     }
 
     /**
@@ -54,9 +59,7 @@ class RelayController
             return new JsonResponse(['error' => 'project_not_found'], 404);
         }
 
-        return new JsonResponse([
-            'id' => $accepter->ingest($project, $envelope, $accepter->sdkNameFromEnvelope($envelope['header'])),
-        ]);
+        return $accepter->respond($envelope, $accepter->ingest($project, $envelope, $accepter->sdkNameFromEnvelope($envelope['header'])));
     }
 
     protected function relay(Request $request): Response|JsonResponse
@@ -71,8 +74,9 @@ class RelayController
         $upstream = $parsed['scheme'].'://'.$parsed['host_with_port'].$relayPath;
         $body = $request->getContent();
         $headers = $this->forwardedHeaders($request);
+        $replay = ReplayEnvelope::isReplay($body, $request->header('Content-Encoding'));
 
-        if ((bool) config('watchtower.relay.async', false)) {
+        if ((bool) config('watchtower.relay.async', false) && ! $replay) {
             $job = new ForwardEnvelope($upstream, $body, $headers);
             $queue = config('watchtower.relay.queue');
 
@@ -85,16 +89,16 @@ class RelayController
             return new JsonResponse(['queued' => true], 202);
         }
 
-        return $this->forwardSync($upstream, $body, $headers);
+        return $this->forwardSync($upstream, $body, $headers, gzip: ! $replay);
     }
 
     /**
      * @param  array<string, string>  $headers
      */
-    protected function forwardSync(string $upstream, string $body, array $headers): Response|JsonResponse
+    protected function forwardSync(string $upstream, string $body, array $headers, bool $gzip = true): Response|JsonResponse
     {
         try {
-            $response = app(EnvelopeForwarder::class)->forward($upstream, $body, $headers);
+            $response = app(EnvelopeForwarder::class)->forward($upstream, $body, $headers, gzip: $gzip);
         } catch (GuzzleException $e) {
             return new JsonResponse([
                 'error' => 'upstream_unreachable',

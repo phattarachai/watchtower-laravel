@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/browser';
 import { beforeSend as livewireBeforeSend } from './livewire.js';
 import { beforeSend as noiseBeforeSend } from './noise.js';
+import { readReplayConfig } from './replay-config.js';
 
 let initialized = false;
 
@@ -9,7 +10,7 @@ let initialized = false;
  *
  * Wraps Sentry.init() with the Watchtower-tuned defaults (same-origin tunnel,
  * no PII, browser-extension denyUrls, crawler and chunk-load rules) and forwards <meta name="watchtower-user-*">
- * tags into Sentry's user scope.
+ * tags into Sentry's user scope. <meta name="watchtower-replay"> loads Session Replay as a separate chunk.
  *
  * Idempotent — only the first call performs Sentry.init(); subsequent calls
  * just re-apply user context (useful after a SPA navigation that swaps the
@@ -23,6 +24,8 @@ export function initWatchtower() {
     }
 
     if (!initialized) {
+        const replay = readReplayConfig(document.querySelector('meta[name="watchtower-replay"]')?.content);
+
         Sentry.init({
             dsn: import.meta.env.VITE_SENTRY_DSN,
             tunnel: import.meta.env.VITE_SENTRY_TUNNEL,
@@ -40,8 +43,18 @@ export function initWatchtower() {
                 /^safari-extension:\/\//i,
                 /^safari-web-extension:\/\//i,
             ],
+            ...(replay && {
+                replaysSessionSampleRate: replay.sessionSampleRate,
+                replaysOnErrorSampleRate: replay.onErrorSampleRate,
+            }),
         });
         initialized = true;
+
+        if (replay) {
+            import('./replay-integration.js')
+                .then(({ startReplay }) => startReplay(replay, import.meta.env.VITE_SENTRY_TUNNEL))
+                .catch(() => {});
+        }
     }
 
     applyWatchtowerUser();

@@ -9,6 +9,28 @@ This file records anything released before that automation landed.
 
 ## Upgrade notes
 
+### Unreleased
+
+- **Session Replay, relay mode only, off by default.** Set `WATCHTOWER_REPLAY_ON_ERROR_SAMPLE_RATE` (or
+  `WATCHTOWER_REPLAY_SESSION_SAMPLE_RATE`) above 0 and turn on the project's replay switch on the central Watchtower.
+  `@watchtowerUser` then renders `<meta name="watchtower-replay">`, and `initWatchtower()` lazy-loads the SDK's
+  `replayIntegration()` with every masking default on, plus Livewire's `wire:snapshot` / `wire:effects` and Inertia's
+  `data-page` attributes masked. With both rates at 0 the page loads no replay code.
+- **Re-publish the browser helper**: `php artisan vendor:publish --tag=watchtower-js --force`. It adds
+  `replay-config.js`, `replay-integration.js` and `replay-link.js` next to `watchtower.js`. Run `php artisan view:clear`
+  once so cached layouts pick up the new `@watchtowerUser` output.
+- **PHP errors link to the replay.** Same-origin fetch and XHR requests carry `X-Watchtower-Replay-Id` while a replay
+  runs, `WatchtowerUserContext` sets it as the `replayId` tag, and a 5xx response flushes an on-error replay. The
+  middleware is now registered when replay is on even with `WATCHTOWER_USER_CONTEXT=false` (it then only tags the replay).
+- `Watchtower::recordReplaysWhen(fn (Request $request): bool => …)` vetoes routes or users.
+- **Relay:** replay envelopes are forwarded inline and byte for byte, even with `WATCHTOWER_RELAY_ASYNC=true`. Host nginx
+  `client_max_body_size` and PHP `post_max_size` must allow 5 MB.
+- **Standalone / dual:** replay never starts, and the embedded server answers replay envelopes
+  `429` + `X-Sentry-Rate-Limits: 3600:replay:project` instead of a silent 200; `dual` no longer forwards them upstream. Its per-minute 429 now names the
+  `error` category (`60:error:project`) rather than `event`, which the browser SDK never checked.
+- `watchtower:doctor` reports the replay setting (and warns about a stale published helper, a low `post_max_size`, or
+  a rate set outside relay mode); `watchtower:test` prints it; `watchtower:install` writes both rate keys switched off.
+
 ### 1.8.0
 
 - **URLs are scrubbed at the SDK.** A query value whose key is in `before_send.scrub_keys`, and a signed URL's

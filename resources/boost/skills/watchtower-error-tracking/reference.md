@@ -91,6 +91,8 @@ Both paths go through one forwarder that:
 - **reuses its HTTP client**, so a queue worker (or Octane) keeps the upstream TLS connection alive across envelopes instead of handshaking per envelope. Under PHP-FPM each request still opens its own connection — async forwarding is the way to amortize it;
 - **gzips** envelopes of 1 KB and up that the browser sent uncompressed (`WATCHTOWER_FORWARD_GZIP=false` to turn off). Every Watchtower relay endpoint inflates `Content-Encoding: gzip`.
 
+Replay envelopes (items `replay_event` / `replay_recording`) always take the sync path, even with `WATCHTOWER_RELAY_ASYNC=true`, so a recording segment never sits in the host's Redis, and they are forwarded byte for byte without the gzip step. See [Session Replay](#session-replay-relay-mode-only).
+
 `ForwardEnvelope` retries an unreachable upstream or a 5xx twice (10 s, then 60 s), drops a 4xx — including a 429, which is the upstream asking for less traffic — and on its last attempt logs a warning and completes, so an upstream outage never parks envelope bodies in `failed_jobs`.
 
 ### Configuration reference
@@ -109,6 +111,8 @@ Both paths go through one forwarder that:
 | `WATCHTOWER_CONNECT_TIMEOUT` | `3` | Guzzle connect timeout (seconds, float). |
 | `WATCHTOWER_VERIFY_SSL` | `true` | Disable for self-signed dev Watchtower instances only. |
 | `WATCHTOWER_FORWARD_GZIP` | `true` | gzip uncompressed envelopes (≥ 1 KB) before forwarding upstream. |
+| `WATCHTOWER_REPLAY_SESSION_SAMPLE_RATE` | `0` | Share of visits recorded as a [Session Replay](#session-replay-relay-mode-only), 0..1. Relay mode only. |
+| `WATCHTOWER_REPLAY_ON_ERROR_SAMPLE_RATE` | `0` | Share of errors that keep the replay leading up to them, 0..1. Relay mode only. |
 | `WATCHTOWER_USER_CONTEXT` | `true` | Set `false` to disable the auto-pushed [user context middleware](#user-context-middleware) entirely. |
 | `WATCHTOWER_USER_CONTEXT_GUARDS` | `auto` | `auto` walks `array_keys(config('auth.guards'))`; or a comma-separated list (`web,admin,api`) to fix priority and narrow the set. First authenticated guard wins. |
 | `WATCHTOWER_BEFORE_SEND` | `true` | Set `false` to skip the [BeforeSend pipeline](#beforesend-pipeline) (no noise drop, no scrubbing). |
@@ -387,7 +391,7 @@ The third published file, `resources/js/vendor/noise.js`, runs first in the help
 
 The Watchtower server applies the same two rules at ingest (`WATCHTOWER_DROP_BOT_EVENTS`, and chunk-load grouping in `watchtower-core`), so clients that haven't re-published the helper are covered too. The rules only group and drop; reloading the page on `vite:preloadError` so the visitor gets the new build is up to the app.
 
-The published helper is yours to edit — `--force=false` on re-runs means customizations are preserved. The package version is the source of truth in `vendor/phattarachai/watchtower-laravel/resources/js/{watchtower,livewire,noise}.js`. To customize the Sentry options (e.g. add `ignoreErrors`), edit `Sentry.init({ ... })` inside the published helper, not in every entry. To customize the meta-tag template, publish the view with `php artisan vendor:publish --tag=watchtower-views` and edit `resources/views/vendor/watchtower/user-meta.blade.php` — the `@watchtowerUser` directive will pick up the override automatically.
+The published helper is yours to edit — `--force=false` on re-runs means customizations are preserved. The package version is the source of truth in `vendor/phattarachai/watchtower-laravel/resources/js/{watchtower,livewire,noise,replay-config,replay-integration,replay-link}.js`. To customize the Sentry options (e.g. add `ignoreErrors`), edit `Sentry.init({ ... })` inside the published helper, not in every entry. To customize the meta-tag template, publish the view with `php artisan vendor:publish --tag=watchtower-views` and edit `resources/views/vendor/watchtower/user-meta.blade.php` — the `@watchtowerUser` directive will pick up the override automatically.
 
 ### Recommended `.env` per environment
 
@@ -400,6 +404,86 @@ The published helper is yours to edit — `--force=false` on re-runs means custo
 For the rare cases that warrant splitting backend and frontend into two Watchtower projects, set `VITE_SENTRY_DSN` to the second project's DSN — see [When to split into two projects](#when-to-split-into-two-projects).
 
 **Do not set `SENTRY_TRACES_SAMPLE_RATE`.** Watchtower drops trace items.
+
+## Session Replay (relay mode only)
+
+The browser SDK's `replayIntegration()` records a masked DOM replay. The central Watchtower stores and plays it, and
+links it to the browser and PHP errors raised during it. The package never stores replays itself: `standalone` and
+`dual` don't record.
+
+### Turn it on
+
+1. Turn on the project's replay switch on the central Watchtower. While it is off, the server answers replay envelopes
+   `429` + `X-Sentry-Rate-Limits: 3600:replay:project` and the SDK stops recording; errors keep flowing.
+2. Set a rate in `.env` (both default to `0`, `watchtower:install` writes them switched off):
+
+   ```dotenv
+   WATCHTOWER_REPLAY_ON_ERROR_SAMPLE_RATE=1.0   # buffer the last minute, send it when an error happens
+   WATCHTOWER_REPLAY_SESSION_SAMPLE_RATE=0      # share of visits recorded from the first page
+   ```
+
+   Customer-facing apps start on-error only. Mention session recording in the app's privacy notice.
+3. Re-publish the browser helper after the upgrade that adds replay:
+   `php artisan vendor:publish --tag=watchtower-js --force`, then rebuild. `watchtower:doctor` and `watchtower:test`
+   warn while `resources/js/vendor/watchtower.js` predates it.
+4. Raise the host's body limits: a segment can be 5 MB (nginx `client_max_body_size 5m`, PHP `post_max_size=5M`).
+
+### How it works
+
+- `@watchtowerUser` (and so the Filament `PanelsRenderHook::HEAD_END` hook) renders
+  `<meta name="watchtower-replay" content="{&quot;sessionSampleRate&quot;:…,&quot;onErrorSampleRate&quot;:…}">` when
+  the app is in relay mode, a rate is above 0, the route isn't one of the package's own (`watchtower.*`) and the
+  host's veto allows it. A host that published `user-meta.blade.php` still gets it: the tag comes from a separate
+  `replay-meta` view.
+- `initWatchtower()` reads the tag once, passes the rates to `Sentry.init`, and dynamic-imports
+  `replay-integration.js`, which adds `replayIntegration()`. Vite emits that as its own chunk, so with both rates at 0
+  the page loads none of the replay code.
+- **Masking.** `replay-config.js` keeps the SDK's `maskAllText`, `maskAllInputs` and `blockAllMedia`, an empty
+  `networkDetailAllowUrls`, and adds `wire:snapshot`, `wire:effects`, `wire:initial-data` and `data-page` to
+  `maskAttributes` (the SDK masks only `title`, `placeholder` and `aria-label`). Those attributes carry Livewire's
+  component state and Inertia ≤2's page JSON, re-sent on every morph; masked, they arrive as `*` runs. Inertia v3 keeps
+  its page JSON in a `<script type="application/json">`, which the recorder drops. The SDK's
+  `beforeAddRecordingEvent` can't do this: in 11.x it only sees custom events, never snapshots or mutations.
+- **PHP errors link to the replay.** While a replay runs, `replay-link.js` adds `X-Watchtower-Replay-Id` to every
+  same-origin `fetch` and `XMLHttpRequest` (Livewire uses fetch; Inertia v2 axios and Inertia v3's client use XHR),
+  except the tunnel. `WatchtowerUserContext` validates it (32 lowercase hex) and sets the Sentry tag `replayId` on the
+  PHP scope; the server reads `tags.replayId` into the event's replay link. It tags even with
+  `WATCHTOWER_USER_CONTEXT=false`.
+- **A 5xx keeps an on-error replay.** The same hook calls `Sentry.getReplay().flush()` when one of those responses is
+  500 or more, so a buffered replay is sent even though the browser threw nothing (sampled by the on-error rate).
+  419 and 422 never flush, and a page with no replay running never starts one.
+
+### Veto routes or users
+
+```php
+use Illuminate\Http\Request;
+use Phattarachai\WatchtowerLaravel\Watchtower;
+
+Watchtower::recordReplaysWhen(fn (Request $request): bool => ! $request->routeIs('checkout.*', 'consent.*')
+    && ! $request->user()?->is_staff);
+```
+
+Register it in a service provider's `boot()`. It runs when the page's `<head>` renders, i.e. on a full page load.
+An Inertia visit or `wire:navigate` keeps recording until the next full load, so gate a whole SPA section by its
+entry route, or keep sensitive screens out of the SPA.
+
+### Masking rules for customer apps
+
+- Never set `maskAllText: false` or `maskAllInputs: false`, and never add `unmask` / `unblock` selectors: an
+  unmasked element also shows its masked attributes in clear.
+- Keep `networkDetailAllowUrls` empty: anything listed sends request and response bodies and headers.
+- Hide a widget completely with the `sentry-block` class (`data-sentry-block`); mask extra attributes by adding them to
+  `maskAttributes` in the published `replay-config.js`.
+
+### Relay and embedded behaviour
+
+- The relay detects replay envelopes and forwards them inline, raw, even with `WATCHTOWER_RELAY_ASYNC=true`. The server
+  answers `200` when stored, `429` + `X-Sentry-Rate-Limits: 3600:replay:project` when the project switch is off,
+  `60:replay:project` over budget, and `413` over its size cap; the relay passes each through, and any non-2xx makes
+  the SDK stop that replay without retrying. A slow upload may need `WATCHTOWER_RELAY_TIMEOUT` above 5 s.
+- In `standalone` / `dual` the meta tag never appears, so the page doesn't record. A replay envelope that still reaches
+  the embedded server (a cached old page) gets `429 3600:replay:project` without spending the event budget, and `dual`
+  doesn't forward it upstream either; error items in the same envelope are still stored. `watchtower:doctor` warns when a rate is set in those modes.
 
 ## Browser-side init
 
@@ -738,6 +822,11 @@ The PAT holder gets read **and** mutate access to every project their teams own 
 | Standalone: Redis memory balloons with `ProcessEventJob` payloads | The self-capture loop (pre-1.2.0) or a flood with no dedicated queue | [Self-capture loop — triage](#self-capture-loop--triage) |
 | Standalone: an issue's event count keeps rising but no new events appear | The per-fingerprint budget is dampening it — counted, not stored | Expected. Raise `WATCHTOWER_RATE_LIMIT_PER_FINGERPRINT_PER_MIN` if you need more samples |
 | Standalone: an event shows the `watchtower.truncated` tag | It was over `WATCHTOWER_MAX_EVENT_BYTES` / had strings over `WATCHTOWER_MAX_STRING_BYTES` | Expected; raise the limits if a specific field matters |
+| Replay: no `watchtower-replay` meta tag in the page `<head>` | Mode isn't `relay`, both rates are 0 (or config is cached), the veto returned false, or the layout has no `@watchtowerUser` | `php artisan watchtower:test` prints the replay line; `php artisan config:clear`; `php artisan view:clear` after upgrading |
+| Replay: tag present but no `replay-integration-*.js` request | The published `resources/js/vendor/watchtower.js` predates replay | `php artisan vendor:publish --tag=watchtower-js --force`, rebuild |
+| Replay: segments answered 429 `3600:replay:project` | The project's replay switch is off on the server (or the app is standalone/dual) | Turn the switch on; replay is relay-mode only |
+| Replay: segments answered 413 by nginx | Host body limit below 5 MB | `client_max_body_size 5m` and `post_max_size=5M` |
+| Replay: a PHP error isn't linked to its replay | The request bypassed `fetch`/XHR (a plain form post or full reload), or no replay was running yet | Expected for full-page posts: the link needs the header, which only same-origin fetch/XHR carry |
 | Standalone: a failing `ProcessEventJob` never shows up in the Watchtower inbox | By design — Watchtower's own job failures are not self-captured | Check `failed_jobs` / Horizon's failed list and the worker log |
 
 ## Updating this skill
