@@ -7,6 +7,7 @@ namespace Phattarachai\WatchtowerLaravel\Http\Middleware;
 use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\Request;
+use Phattarachai\WatchtowerLaravel\Support\ReplayConfig;
 use Sentry\State\Scope;
 use Throwable;
 
@@ -14,6 +15,8 @@ class WatchtowerUserContext
 {
     public function handle(Request $request, Closure $next): mixed
     {
+        $this->tagReplay($request);
+
         if (config('watchtower.user_context.enabled') === false) {
             return $next($request);
         }
@@ -25,6 +28,19 @@ class WatchtowerUserContext
         }
 
         return $next($request);
+    }
+
+    private function tagReplay(Request $request): void
+    {
+        $replayId = ReplayConfig::replayIdFrom($request);
+
+        if ($replayId === null) {
+            return;
+        }
+
+        \Sentry\configureScope(function (Scope $scope) use ($replayId): void {
+            $scope->setTag(ReplayConfig::TAG, $replayId);
+        });
     }
 
     private function attachUser(Request $request): void

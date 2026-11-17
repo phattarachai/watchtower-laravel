@@ -106,3 +106,18 @@ function wtUser(): WtUser
         ['name' => 'Ops User', 'password' => bcrypt('secret')],
     );
 }
+
+function replayFixture(string $name): string
+{
+    return (string) file_get_contents(__DIR__."/Fixtures/replay/{$name}.envelope");
+}
+
+/**
+ * @param  array<string, mixed>  $header
+ */
+function withEnvelopeHeader(string $envelope, array $header): string
+{
+    [$first, $rest] = explode("\n", $envelope, 2);
+
+    return json_encode([...json_decode($first, true), ...$header], JSON_THROW_ON_ERROR)."\n".$rest;
+}

@@ -51,8 +51,14 @@ whose stack is the minified SDK, so it reads as if Watchtower itself were crashi
 fingerprints every chunk-load failure as `['chunk-load-error']`. Core applies the same two rules at ingest
 (`BotDetector`, `Fingerprinter`), so keep its `BOT_USER_AGENT` in step with core's.
 
-All three files publish under the `watchtower-js` tag. `livewire.js` and `noise.js` are deliberately
-import-free so they can be unit-tested without a bundler or npm install; `noise.js` takes the user agent
+Session Replay (relay mode only) adds `replay-config.js` (meta-tag parsing, `replayIntegration()` options with the
+Livewire/Inertia attributes masked), `replay-link.js` (the `X-Watchtower-Replay-Id` header on same-origin fetch/XHR and
+the flush on a 5xx) and `replay-integration.js`, the only one importing Sentry, which `watchtower.js` dynamic-imports so
+replay ships as its own chunk. Masking goes through the SDK's `maskAttributes`: `beforeAddRecordingEvent` only sees
+custom events in SDK 11.x.
+
+All six files publish under the `watchtower-js` tag. Every file except `watchtower.js` and `replay-integration.js` is
+deliberately import-free so it can be unit-tested without a bundler or npm install; `noise.js` takes the user agent
 as an argument.
 
 ## Core first

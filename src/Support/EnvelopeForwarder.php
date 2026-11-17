@@ -19,7 +19,8 @@ use Psr\Http\Message\ResponseInterface;
  * old per-call client.
  *
  * Bodies the browser sent uncompressed are gzipped on the way out; every
- * Watchtower relay endpoint inflates `Content-Encoding: gzip`.
+ * Watchtower relay endpoint inflates `Content-Encoding: gzip`. Replay
+ * envelopes are already compressed and pass through as received.
  */
 class EnvelopeForwarder
 {
@@ -32,9 +33,9 @@ class EnvelopeForwarder
      *
      * @throws GuzzleException
      */
-    public function forward(string $upstream, string $body, array $headers, ?int $timeout = null): ResponseInterface
+    public function forward(string $upstream, string $body, array $headers, ?int $timeout = null, bool $gzip = true): ResponseInterface
     {
-        [$body, $headers] = $this->compress($body, $headers);
+        [$body, $headers] = $gzip ? $this->compress($body, $headers) : [$body, $headers];
 
         return $this->client()->post($upstream, [
             'headers' => $headers,

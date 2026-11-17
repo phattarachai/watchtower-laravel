@@ -1,7 +1,7 @@
 ---
 name: watchtower-error-tracking
 description: "Wire Watchtower (self-hosted, Sentry-compatible) into a Laravel or browser app, and triage its issues over MCP, down to sweeping the production inbox. Triggers on \"Watchtower\", \"set up error tracking\", \"sweep production issues\", \"verify the exception was reported\", WATCHTOWER_DSN, or SENTRY_LARAVEL_DSN."
-version: 2026.10.31.1
+version: 2026.11.17.1
 ---
 
 # Watchtower error tracking
@@ -16,6 +16,7 @@ Watchtower is a self-hosted, Sentry-compatible exception tracker. Client apps re
 - **Browser reporting** — `@sentry/browser` pointed at `VITE_SENTRY_DSN` and tunnelled through the same-origin `/api/watchtower-relay` route, so ad blockers don't drop envelopes.
 - **User context** — the `WatchtowerUserContext` middleware plus the `@watchtowerUser` Blade directive, so events arrive with the signed-in user attached.
 - **Noise filtering + scrubbing** — a `before_send` pipeline that drops framework exceptions (validation, auth, 404, CSRF, …) and strips secrets from request data, headers, cookies, URLs, and extra.
+- **Session Replay (relay mode, opt-in)** — `WATCHTOWER_REPLAY_*_SAMPLE_RATE` switch on the SDK's masked `replayIntegration()`, loaded as a separate chunk; PHP errors link to the replay through `X-Watchtower-Replay-Id`. See `reference.md` § "Session Replay".
 - **MCP server** — a project-scoped `watchtower` entry in `.mcp.json` exposing `mcp__watchtower__*` tools for issue triage from inside Claude Code.
 
 Config lives in `config/watchtower.php`; every default above is opt-out via env (see [Smart defaults](#smart-defaults-laravel-package)). `php artisan watchtower:test` verifies backend, relay, and frontend wiring end to end.
@@ -167,6 +168,8 @@ Add `--patch-js` to inject the Sentry init block at the top of every detected Vi
 | `SENTRY_SEND_DEFAULT_PII` install prompt | **Opt-in**: defaults to `no` across every env (regulated industries and casual installs both get the conservative default). Without it, the Sentry SDK strips the request data + IP *before* `BeforeSend` runs — User tab + Request tab stay empty. Flip to `yes` only after confirming `BeforeSend`'s scrub coverage is sufficient for your app's data; then `BeforeSend` becomes the scrubbing safety net that makes it safe to leave on. | Answer `yes` at the prompt, or set `SENTRY_SEND_DEFAULT_PII=true` in `.env` after install |
 | Browser: `initWatchtower()` helper (`resources/js/vendor/watchtower.js`) | Single-call entry-point that runs `Sentry.init(...)` with Watchtower-tuned defaults (same-origin tunnel, `denyUrls` for browser extensions, no PII) and then reads `<meta name="watchtower-user-{id,email,name}">` from the document to call `Sentry.setUser(...)`. Per-entry footprint is `import { initWatchtower } from './vendor/watchtower.js'; initWatchtower();` — the Sentry config lives inside the helper, so multiple entries don't duplicate it. The install command publishes the helper; `--patch-js` injects the import into detected Vite entries; `--patch-views` injects the `@watchtowerUser` directive into detected layouts. | Don't paste the directive, or don't call the helper |
 | Blade: `@watchtowerUser` directive | Compiles to the three `<meta name="watchtower-user-{id,email,name}">` tags read by the browser helper. Registered automatically by the package. The source view lives at `vendor/phattarachai/watchtower-laravel/resources/views/user-meta.blade.php`; publish with `php artisan vendor:publish --tag=watchtower-views` to override at `resources/views/vendor/watchtower/user-meta.blade.php`. For Filament admin panels, register a `PanelsRenderHook::HEAD_END` hook that returns `Blade::render('@watchtowerUser')`. | Don't add `@watchtowerUser` to the layout / panel hook |
+
+| Session Replay (relay mode) | Off until `WATCHTOWER_REPLAY_ON_ERROR_SAMPLE_RATE` / `WATCHTOWER_REPLAY_SESSION_SAMPLE_RATE` is above 0 **and** the project's replay switch is on at the central Watchtower. Then `@watchtowerUser` emits `<meta name="watchtower-replay">` and `initWatchtower()` lazy-loads `replayIntegration()` with all text and inputs masked, media blocked, `networkDetailAllowUrls` empty, and Livewire/Inertia state attributes (`wire:snapshot`, `wire:effects`, `data-page`) masked. Same-origin requests carry `X-Watchtower-Replay-Id`, so PHP errors get the `replayId` tag; a 5xx flushes an on-error replay. `Watchtower::recordReplaysWhen(fn (Request $r): bool => …)` vetoes routes or users. **Never loosen `maskAllText`/`maskAllInputs`, never add `unmask`, keep `networkDetailAllowUrls` empty in customer apps.** `standalone`/`dual` never record. | Leave both rates at `0` |
 
 Config reference (`config/watchtower.php` → `user_context` and `before_send` sections) and the full env-key table live in `reference.md` § "Smart defaults".
 

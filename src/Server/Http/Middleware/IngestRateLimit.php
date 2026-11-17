@@ -45,6 +45,6 @@ class IngestRateLimit
         return response()
             ->json(['error' => 'rate_limited'], 429)
             ->header('Retry-After', (string) $retryAfter)
-            ->header('X-Sentry-Rate-Limits', $retryAfter.':event:project');
+            ->header('X-Sentry-Rate-Limits', $retryAfter.':error:project');
     }
 }

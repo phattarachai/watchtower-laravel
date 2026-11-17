@@ -15,6 +15,7 @@ use Phattarachai\WatchtowerLaravel\Server\Sentry\LocalTransport;
 use Phattarachai\WatchtowerLaravel\Server\Ui\UiPage;
 use Phattarachai\WatchtowerLaravel\Support\Dsn;
 use Phattarachai\WatchtowerLaravel\Support\EmbeddedUiPatcher;
+use Phattarachai\WatchtowerLaravel\Support\ReplayConfig;
 use Sentry\Client;
 use Sentry\SentrySdk;
 use Throwable;
@@ -38,6 +39,8 @@ final class DoctorCommand extends Command
         'watchtower_alert_rules',
         'watchtower_notifications_sent',
     ];
+
+    private const int REPLAY_BODY_BYTES = 5_242_880;
 
     protected $signature = 'watchtower:doctor';
 
@@ -72,9 +75,51 @@ final class DoctorCommand extends Command
             ? 'watchtower.dsn is missing or malformed — expected scheme://key@host/{numeric project id}.'
             : null);
 
-        return $failures + $this->check('Relay route registered', fn (): ?string => config('watchtower.relay.enabled', true) === false
+        $failures += $this->check('Relay route registered', fn (): ?string => config('watchtower.relay.enabled', true) === false
             ? 'watchtower.relay.enabled is false, so the browser tunnel route is not registered.'
             : (Route::has('watchtower.relay') ? null : 'Route [watchtower.relay] is missing.'));
+
+        $this->replayAdvisory();
+
+        return $failures;
+    }
+
+    private function replayAdvisory(): void
+    {
+        if (! ReplayConfig::configured()) {
+            $this->advisory('Session Replay', 'Off — set WATCHTOWER_REPLAY_ON_ERROR_SAMPLE_RATE to record replays on the central Watchtower.');
+
+            return;
+        }
+
+        $rates = 'session '.ReplayConfig::sessionSampleRate().', on-error '.ReplayConfig::onErrorSampleRate();
+
+        match (true) {
+            ReplayConfig::publishedHelperLacksReplay() => $this->advisory('Session Replay', "On ({$rates}), but resources/js/vendor/watchtower.js predates replay. Re-publish it with `php artisan vendor:publish --tag=watchtower-js --force`.", warn: true),
+            self::bytes((string) ini_get('post_max_size')) < self::REPLAY_BODY_BYTES => $this->advisory('Session Replay', "On ({$rates}), but post_max_size is ".ini_get('post_max_size').' — a replay segment can be 5 MB. Raise post_max_size and nginx client_max_body_size to at least 5M.', warn: true),
+            default => $this->advisory('Session Replay', "On ({$rates}). Turn on the project's replay switch on the central Watchtower, and keep nginx client_max_body_size at 5M or more."),
+        };
+    }
+
+    private static function bytes(string $size): int
+    {
+        $value = (int) $size;
+
+        return match (strtoupper(substr(trim($size), -1))) {
+            'G' => $value * 1_073_741_824,
+            'M' => $value * 1_048_576,
+            'K' => $value * 1_024,
+            default => $value,
+        };
+    }
+
+    private function embeddedReplayAdvisory(): void
+    {
+        if (! ReplayConfig::configured()) {
+            return;
+        }
+
+        $this->advisory('Session Replay', 'WATCHTOWER_REPLAY_* rates are set, but replay works in relay mode only. In '.config('watchtower.mode').' mode the page never starts a replay and the embedded server refuses replay envelopes. Unset them.', warn: true);
     }
 
     private function embeddedChecks(): int
@@ -103,6 +148,7 @@ final class DoctorCommand extends Command
         $failures += $this->queueCheck();
         $this->redisMemoryAdvisory();
         $this->mcpAdvisory();
+        $this->embeddedReplayAdvisory();
 
         return $failures + $this->selfCaptureCheck();
     }

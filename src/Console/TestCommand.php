@@ -10,6 +10,7 @@ use Illuminate\Support\Str;
 use Phattarachai\WatchtowerLaravel\Support\Dsn;
 use Phattarachai\WatchtowerLaravel\Support\FrontendPatcher;
 use Phattarachai\WatchtowerLaravel\Support\LayoutDetector;
+use Phattarachai\WatchtowerLaravel\Support\ReplayConfig;
 use Phattarachai\WatchtowerLaravel\Support\ViteEntryDetector;
 use Phattarachai\WatchtowerLaravel\Watchtower;
 
@@ -36,12 +37,22 @@ class TestCommand extends Command
         $this->line('Project ID: '.$parsed['project_id']);
         $this->line('Relay path: '.$relayPath);
         $this->line('Async:      '.($async ? 'true' : 'false'));
+        $this->line('Replay:     '.$this->replaySummary());
 
         $sentryOk = $this->runSentryProbe();
         $relayOk = $this->runRelayProbe($dsn, $relayPath);
         $frontendOk = $this->verifyFrontendWiring();
 
         return $sentryOk && $relayOk && $frontendOk ? self::SUCCESS : self::FAILURE;
+    }
+
+    private function replaySummary(): string
+    {
+        return match (true) {
+            ! ReplayConfig::configured() => 'off',
+            ! ReplayConfig::enabled() => 'rates set but ignored outside relay mode',
+            default => 'session '.ReplayConfig::sessionSampleRate().', on-error '.ReplayConfig::onErrorSampleRate(),
+        };
     }
 
     /**
@@ -83,6 +94,10 @@ class TestCommand extends Command
 
         if ($layouts !== [] && count($missingLayouts) === count($layouts)) {
             $problems[] = 'No detected Blade layout has been patched yet — run `php artisan watchtower:install --patch-views`.';
+        }
+
+        if (ReplayConfig::enabled() && ReplayConfig::publishedHelperLacksReplay()) {
+            $problems[] = 'Session Replay is on, but resources/js/vendor/watchtower.js predates it — run `php artisan vendor:publish --tag=watchtower-js --force`.';
         }
 
         if ($envBugLine !== null) {

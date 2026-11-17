@@ -147,6 +147,15 @@ return [
         'queue' => env('WATCHTOWER_RELAY_QUEUE'),
     ],
 
+    // Session Replay (relay mode only): the browser SDK records a masked DOM
+    // replay and sends it through the relay to the central Watchtower. Both
+    // rates are 0..1 and 0 turns replay off. Gate routes or users with
+    // Watchtower::recordReplaysWhen().
+    'replay' => [
+        'session_sample_rate' => (float) env('WATCHTOWER_REPLAY_SESSION_SAMPLE_RATE', 0),
+        'on_error_sample_rate' => (float) env('WATCHTOWER_REPLAY_ON_ERROR_SAMPLE_RATE', 0),
+    ],
+
     'forwarder' => [
         'verify_ssl' => filter_var(env('WATCHTOWER_VERIFY_SSL', true), FILTER_VALIDATE_BOOL),
         'connect_timeout' => (float) env('WATCHTOWER_CONNECT_TIMEOUT', 3),
